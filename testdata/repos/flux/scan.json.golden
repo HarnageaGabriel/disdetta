@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1",
+  "findings": [
+    {
+      "code": "DSD-003",
+      "severity": "DSD-SEV-3",
+      "message": "Bitnami image",
+      "reference": "docker.io/bitnami/redis:7",
+      "classification": "bitnami",
+      "path": "repository.yaml",
+      "line": 16,
+      "stateful": true
+    },
+    {
+      "code": "DSD-004",
+      "severity": "DSD-SEV-3",
+      "message": "Bitnami chart source",
+      "reference": "oci://registry-1.docker.io/bitnamicharts",
+      "classification": "chart",
+      "path": "repository.yaml",
+      "line": 7,
+      "stateful": false
+    }
+  ]
+}

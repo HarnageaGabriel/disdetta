@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1",
+  "findings": [
+    {
+      "code": "DSD-002",
+      "severity": "DSD-SEV-2",
+      "message": "Bitnami legacy image",
+      "reference": "docker.io/bitnamilegacy/postgresql:16.4.0",
+      "classification": "bitnamilegacy",
+      "path": "values.yaml",
+      "line": 6,
+      "stateful": true
+    },
+    {
+      "code": "DSD-003",
+      "severity": "DSD-SEV-3",
+      "message": "Bitnami image",
+      "reference": "docker.io/bitnami/redis:7",
+      "classification": "bitnami",
+      "path": "Dockerfile",
+      "line": 1,
+      "stateful": true
+    },
+    {
+      "code": "DSD-001",
+      "severity": "DSD-SEV-1",
+      "message": "allowInsecureImages is enabled",
+      "reference": "true",
+      "classification": "configuration",
+      "path": "values.yaml",
+      "line": 4,
+      "stateful": false
+    },
+    {
+      "code": "DSD-004",
+      "severity": "DSD-SEV-3",
+      "message": "Bitnami chart source",
+      "reference": "https://charts.bitnami.com/bitnami",
+      "classification": "chart",
+      "path": "Chart.yaml",
+      "line": 7,
+      "stateful": false
+    },
+    {
+      "code": "DSD-003",
+      "severity": "DSD-SEV-3",
+      "message": "Bitnami image",
+      "reference": "docker.io/bitnami/postgres-exporter:latest",
+      "classification": "bitnami",
+      "path": "values.yaml",
+      "line": 10,
+      "stateful": false
+    }
+  ]
+}

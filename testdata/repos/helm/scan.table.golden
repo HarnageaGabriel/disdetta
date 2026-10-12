@@ -1,0 +1,6 @@
+LOCATION        CODE     SEVERITY   STATEFUL  REFERENCE
+values.yaml:6   DSD-002  DSD-SEV-2  true      docker.io/bitnamilegacy/postgresql:16.4.0
+Dockerfile:1    DSD-003  DSD-SEV-3  true      docker.io/bitnami/redis:7
+values.yaml:4   DSD-001  DSD-SEV-1  false     true
+Chart.yaml:7    DSD-004  DSD-SEV-3  false     https://charts.bitnami.com/bitnami
+values.yaml:10  DSD-003  DSD-SEV-3  false     docker.io/bitnami/postgres-exporter:latest
