@@ -1,0 +1,8 @@
+.notes/
+.cache/
+/dist/
+/bin/
+*.exe
+coverage.out
+.worktrees/
+.tmp/
