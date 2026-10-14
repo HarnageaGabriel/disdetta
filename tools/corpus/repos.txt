@@ -1,0 +1,12 @@
+FIWARE/data-space-connector 4f3a5969e3ed0df0cfefbfb33e5db9174b086a44 Apache-2.0
+adyen-examples/adyen-php-online-payments 3b7dd161f2a7c2a8799c9d9956aaeb6433dc164c MIT
+camunda/camunda-platform-helm 24369e0fa0e6b0320d1e0ff4ffaba2ffcc8919fc Apache-2.0
+civo/kubernetes-marketplace 08c82ebd1b6a308f40081c3e96b48752567ff886 MIT
+cowboysysop/charts 5a6a728ee77f3e35dcd519670201e7c5510a4cd2 MIT
+ethpandaops/ethereum-helm-charts d8278589944d49ce01af1ad8f22d0e00441503dd MIT
+frappe/helm 3b07ae1d93dbe6601f381f16bd90261faf393578 MIT
+linode/apl-core 984d959bfa70c6bd2252ab89a16898424087e004 Apache-2.0
+litmuschaos/litmus-helm aa7b11b1eceac99bd46851a7fcd3d04fd0ccf9b4 Apache-2.0
+stackitcloud/rag-template 5608d812cb5fbee17de141a149096d685de0a85a Apache-2.0
+tmforum-oda/oda-canvas 75f29ac588776e022a99762238b27283d5546b4a Apache-2.0
+wiremind/wiremind-helm-charts b0e8b0d6324ad8c857e63e60e7bf42af850d349f Apache-2.0
