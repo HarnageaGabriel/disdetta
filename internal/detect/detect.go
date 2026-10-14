@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -163,10 +164,16 @@ func (s *walkState) addRefConfidence(r imageref.Reference, line, column int, emb
 	case imageref.BitnamiLegacy:
 		rule = "DSD-IMG-001"
 	case imageref.Bitnami, imageref.BitnamiSecure:
-		if r.Tag == "" && !r.Templated && r.Digest == "" || strings.EqualFold(r.Tag, "latest") {
+		switch {
+		case r.Registry != "" && r.Registry != "docker.io":
+			// A Bitnami namespace under another registry is a mirror or a
+			// rebuild, not the Docker Hub community tier (spec 2.1, DSD-IMG-004).
+			rule = "DSD-IMG-004"
+			sev = diag.SeverityLow
+		case r.Tag == "" && !r.Templated && r.Digest == "" || strings.EqualFold(r.Tag, "latest"):
 			rule = "DSD-IMG-003"
 			sev = diag.SeverityMedium
-		} else {
+		default:
 			rule = "DSD-IMG-002"
 			attrs = append(attrs, "pull-risk")
 		}
@@ -354,4 +361,138 @@ func pathEnds(path []string, suffix ...string) bool {
 		}
 	}
 	return true
+}
+
+// knownImageKeys are the mapping keys the specific detectors already resolve as
+// image references (spec section 9). The whole-scalar fallback never reports
+// them again, so no scalar is counted twice; a Bitnami chart repository URL
+// inside them is still a chart finding.
+var knownImageKeys = map[string]bool{
+	"annotations": true, "chart": true, "container": true, "digest": true,
+	"home": true, "image": true, "imageRegistry": true, "images": true,
+	"name": true, "newName": true, "registry": true, "repository": true,
+	"repoURL": true, "services": true, "sources": true, "tag": true,
+	"url": true, "uses": true, "values": true, "valuesObject": true,
+}
+
+var bitnamiChartURLs = []string{
+	"https://charts.bitnami.com/bitnami",
+	"oci://registry-1.docker.io/bitnamicharts",
+	"oci://docker.io/bitnamicharts",
+}
+
+// dropDuplicateFallbacks removes whole-scalar fallback findings that repeat a
+// rule already reported at the same file and line by a specific detector, or by
+// an earlier fallback finding: one scalar is never counted twice (spec section
+// 9). Findings added before from are left untouched.
+func (s *walkState) dropDuplicateFallbacks(from int) {
+	if from >= len(s.out.Findings) {
+		return
+	}
+	seen := make(map[string]bool, len(s.out.Findings))
+	for _, f := range s.out.Findings[:from] {
+		seen[fallbackKey(f)] = true
+	}
+	kept := s.out.Findings[:from]
+	for _, f := range s.out.Findings[from:] {
+		key := fallbackKey(f)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		kept = append(kept, f)
+	}
+	s.out.Findings = kept
+}
+
+func fallbackKey(f diag.Finding) string {
+	return f.RuleID + "\x00" + f.Location.Path + "\x00" + strconv.Itoa(f.Location.Line)
+}
+
+// scanFallbacks applies the whole-scalar fallback (spec section 9): a whole
+// scalar image reference under a key no detector knows, and a Bitnami chart
+// repository URL inside any scalar, in any YAML file.
+func (s *walkState) scanFallbacks(root *yaml.Node) { s.scanFallbackAt(root, "", 0) }
+
+func (s *walkState) scanFallbackAt(n *yaml.Node, key string, depth int) {
+	if n == nil || depth > maxYAMLDepth {
+		return
+	}
+	switch n.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			s.scanFallbackAt(n.Content[i+1], n.Content[i].Value, depth+1)
+		}
+	case yaml.SequenceNode:
+		for _, c := range n.Content {
+			s.scanFallbackAt(c, key, depth+1)
+		}
+	case yaml.ScalarNode:
+		s.scanFallbackScalar(n, key)
+	}
+}
+
+func (s *walkState) scanFallbackScalar(n *yaml.Node, key string) {
+	if url, ok := chartURLIn(n.Value); ok {
+		s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, n.Line, n.Column), Reference: url, Original: url, Attributes: []string{"chart"}})
+	}
+	if knownImageKeys[key] || !isWholeImageScalar(n.Value) {
+		return
+	}
+	if r := imageref.Parse(n.Value); r.HasStaticEvidence {
+		s.addRefConfidence(r, n.Line, n.Column, false, true)
+	}
+}
+
+// isWholeImageScalar reports whether a YAML scalar is exactly one image
+// reference. Filesystem paths, prose, shell fragments and URLs are rejected so
+// that partial matches are never findings (spec section 9).
+func isWholeImageScalar(v string) bool {
+	if v == "" || v != strings.TrimSpace(v) || !strings.Contains(v, "/") {
+		return false
+	}
+	if strings.HasPrefix(v, "/") || strings.HasSuffix(v, "/") || strings.Contains(v, "//") {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.', c == '_', c == '-', c == '/', c == ':', c == '@':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// chartURLIn returns the Bitnami chart repository URL inside a scalar, if any
+// (spec section 9: any scalar in any file, including inside a longer scalar).
+func chartURLIn(v string) (string, bool) {
+	lower := strings.ToLower(v)
+	for _, u := range bitnamiChartURLs {
+		i := strings.Index(lower, u)
+		if i < 0 {
+			continue
+		}
+		end := i + len(u)
+		if end < len(v) && v[end] == '/' {
+			end++
+		}
+		if end < len(v) && isReferenceChar(v[end]) {
+			continue
+		}
+		return strings.TrimSpace(v[i:end]), true
+	}
+	return "", false
+}
+
+func isReferenceChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	case c == '.', c == '-', c == '_':
+		return true
+	}
+	return false
 }

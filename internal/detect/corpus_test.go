@@ -95,7 +95,7 @@ func TestRepositoryTriples(t *testing.T) {
 	}{
 		{"sysctl image", "elasticsearch:\n  sysctlImage:\n    enabled: true\n    repository: bitnamilegacy/os-shell\n", []string{"DSD-IMG-001"}},
 		{"volume permissions", "volumePermissions:\n  image:\n    registry: docker.io\n    repository: bitnami/os-shell\n    tag: 12\n", []string{"DSD-IMG-002"}},
-		{"url is not image shaped", "chart:\n  repository: https://charts.bitnami.com/bitnami\n", nil},
+		{"chart url under repository is cht-001 only", "chart:\n  repository: https://charts.bitnami.com/bitnami\n", []string{"DSD-CHT-001"}},
 		{"leading slash is not image shaped", "chart:\n  repository: /bitnami/redis\n", nil},
 		{"non bitnami repository", "helper:\n  repository: example/tool\n", nil},
 	}

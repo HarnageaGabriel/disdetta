@@ -1,0 +1,3 @@
+# Shape of cowboysysop/charts@5a6a728 ct.yaml.
+chart-repos:
+  - bitnami=https://charts.bitnami.com/bitnami/

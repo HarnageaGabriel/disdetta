@@ -1,0 +1,6 @@
+LOCATION                RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
+values.yaml:4:11        DSD-IMG-001  high      inferred    high     registry.example.internal/mirror/bitnamilegacy/redis:7.2
+values.yaml:5:10        DSD-IMG-001  high      inferred    low      docker.io/bitnamilegacy/kubectl:latest
+ct.yaml:3:5             DSD-CHT-001  medium    confirmed   unknown  https://charts.bitnami.com/bitnami/
+dependencies.yaml:4:17  DSD-CHT-001  medium    confirmed   unknown  https://charts.bitnami.com/bitnami
+scanned 3 files, skipped 0, findings 4 (high 2, medium 2, low 0), diagnostics 0, unresolved 0, ignored 0

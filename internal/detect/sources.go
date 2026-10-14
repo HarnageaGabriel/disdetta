@@ -53,6 +53,12 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 	case strings.Contains(base, "values"):
 		s.scanImages(root, false)
 	}
+	// Whole-scalar fallback (spec section 9): unknown-key image scalars and
+	// Bitnami chart repository URLs inside any scalar, in any file. A scalar a
+	// specific detector already reported is not reported again.
+	before := len(s.out.Findings)
+	s.scanFallbacks(root)
+	s.dropDuplicateFallbacks(before)
 }
 
 func (s *walkState) scanCharts(root *yaml.Node) {

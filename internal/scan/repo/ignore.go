@@ -11,6 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
 type ignoreFile struct {
 	Ignores []ignoreEntry `yaml:"ignores"`
 }
@@ -30,7 +32,7 @@ func parseIgnores(data []byte) ([]ignoreEntry, error) {
 		if _, err := time.Parse("2006-01-02", e.Expires); err != nil {
 			return nil, fmt.Errorf("invalid ignore file: ignores[%d].expires must be YYYY-MM-DD", i)
 		}
-		fingerprintOK, _ := regexp.MatchString(`^[0-9a-f]{16}$`, e.Fingerprint)
+		fingerprintOK := fingerprintPattern.MatchString(e.Fingerprint)
 		selectorOK := e.Rule != "" && e.Path != ""
 		if fingerprintOK == selectorOK || (e.Fingerprint != "" && !fingerprintOK) {
 			return nil, fmt.Errorf("invalid ignore file: ignores[%d] needs a 16-hex fingerprint or rule + path", i)

@@ -39,6 +39,12 @@ func Parse(value string) Reference {
 	name := strings.TrimSpace(static)
 	name = stripUserinfo(name)
 	r := Reference{Original: original, Templated: templated, SafeOriginal: safeOriginal}
+	if !templated && strings.HasPrefix(name, "/") {
+		// An absolute filesystem path, not an image reference (spec section 9).
+		// A templated prefix is different: the static remainder is what counts.
+		r.Classification = Other
+		return r
+	}
 	if at := strings.IndexByte(name, '@'); at >= 0 {
 		r.Digest, name = name[at+1:], name[:at]
 	}
@@ -91,16 +97,52 @@ func normalizeRegistry(v string) string {
 	return strings.ToLower(v)
 }
 func classify(repo string) Classification {
-	first, _, _ := strings.Cut(strings.ToLower(repo), "/")
-	switch first {
-	case "bitnami":
-		return Bitnami
-	case "bitnamilegacy":
-		return BitnamiLegacy
-	case "bitnamisecure":
-		return BitnamiSecure
+	// The Bitnami namespace may appear as any path segment (spec section 2.1,
+	// e.g. ghcr.io/acme/bitnami/redis), so every segment is inspected. Segments
+	// are validated first: a filesystem path such as /opt/bitnami/postgresql is
+	// not an image and stays Other.
+	if !validImageRepository(repo) {
+		return Other
 	}
-	return Other
+	found := Other
+	for _, segment := range strings.Split(strings.ToLower(repo), "/") {
+		switch segment {
+		case "bitnamilegacy":
+			return BitnamiLegacy
+		case "bitnamisecure":
+			found = BitnamiSecure
+		case "bitnami":
+			if found == Other {
+				found = Bitnami
+			}
+		}
+	}
+	return found
+}
+
+// validImageRepository reports whether repo is shaped like a container image
+// repository path: slash-separated, non-empty components of word characters and
+// separators only. Filesystem paths, prose and shell fragments are rejected so
+// the namespace scan above cannot fire on them (spec section 9).
+func validImageRepository(repo string) bool {
+	if repo == "" || strings.HasPrefix(repo, "/") || strings.HasSuffix(repo, "/") || strings.Contains(repo, "//") {
+		return false
+	}
+	for _, segment := range strings.Split(repo, "/") {
+		if segment == "" {
+			return false
+		}
+		for i := 0; i < len(segment); i++ {
+			c := segment[i]
+			switch {
+			case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			case c == '.', c == '_', c == '-':
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 func render(r Reference) string {
 	if r.Registry == "" || r.Repository == "" {

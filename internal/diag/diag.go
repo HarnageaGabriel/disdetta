@@ -101,7 +101,7 @@ type Entry struct {
 }
 
 var entries = []Entry{
-	{Code: "DSD-CFG-001", Title: "allowInsecureImages is enabled", Severity: SeverityHigh}, {Code: "DSD-IMG-001", Title: "Bitnami legacy image", Severity: SeverityHigh}, {Code: "DSD-IMG-002", Title: "Versioned Bitnami image", Severity: SeverityHigh}, {Code: "DSD-IMG-003", Title: "Community Bitnami image", Severity: SeverityMedium}, {Code: "DSD-CHT-001", Title: "Bitnami chart source", Severity: SeverityMedium}, {Code: "DSD-CHT-002", Title: "Vendored Bitnami chart", Severity: SeverityMedium},
+	{Code: "DSD-CFG-001", Title: "allowInsecureImages is enabled", Severity: SeverityHigh}, {Code: "DSD-IMG-001", Title: "Bitnami legacy image", Severity: SeverityHigh}, {Code: "DSD-IMG-002", Title: "Versioned Bitnami image", Severity: SeverityHigh}, {Code: "DSD-IMG-003", Title: "Community Bitnami image", Severity: SeverityMedium}, {Code: "DSD-IMG-004", Title: "Bitnami image from another registry", Severity: SeverityLow}, {Code: "DSD-CHT-001", Title: "Bitnami chart source", Severity: SeverityMedium}, {Code: "DSD-CHT-002", Title: "Vendored Bitnami chart", Severity: SeverityMedium},
 	{Code: "DSD-SCN-001", Title: "Malformed file", Level: LevelError}, {Code: "DSD-SCN-002", Title: "File skipped", Level: LevelWarning}, {Code: "DSD-SCN-003", Title: "Unresolved reference", Level: LevelInfo}, {Code: "DSD-SCN-004", Title: "Read error", Level: LevelError}, {Code: "DSD-SCN-005", Title: "Limit reached", Level: LevelWarning}, {Code: "DSD-SCN-006", Title: "Ignore entry expired", Level: LevelWarning}, {Code: "DSD-SCN-007", Title: "Template text scanned line by line", Level: LevelInfo},
 }
 

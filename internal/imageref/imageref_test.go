@@ -31,6 +31,28 @@ func TestExcludedProjects(t *testing.T) {
 		}
 	}
 }
+
+// Source: docs/spec/v0.1.md sections 2.1 (DSD-IMG-004) and 9. The Bitnami
+// namespace is recognized as any path segment; a filesystem path, shell
+// fragment or prose scalar never classifies as an image.
+func TestNamespaceAnyPathSegment(t *testing.T) {
+	tests := []struct{ input, class string }{
+		{"ghcr.io/acme/bitnami/redis:7", "bitnami"},
+		{"registry.example.internal/mirror/bitnamilegacy/redis:7.2", "bitnamilegacy"},
+		{"ghcr.io/acme/bitnamisecure/redis:7", "bitnamisecure"},
+		{"/opt/bitnami/postgresql/conf", "other"},
+		{"cp -a /opt/bitnami/keycloak/conf/* /config", "other"},
+		{"see bitnami/redis docs", "other"},
+		{"https://github.com/bitnami/charts/tree/main/bitnami/postgresql", "other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := string(Parse(tt.input).Classification); got != tt.class {
+				t.Fatalf("source docs/spec/v0.1.md section 2.1: %q -> %s", tt.input, got)
+			}
+		})
+	}
+}
 func FuzzParse(f *testing.F) {
 	for _, v := range []string{"bitnami/redis:7", "{{ value }}"} {
 		f.Add(v)
