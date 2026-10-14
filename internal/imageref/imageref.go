@@ -46,7 +46,7 @@ func Parse(value string) Reference {
 	if colon := strings.LastIndexByte(name, ':'); colon > lastSlash {
 		r.Tag, name = name[colon+1:], name[:colon]
 	}
-	name = strings.TrimRight(strings.TrimSpace(name), ":@/-")
+	name = strings.Trim(strings.TrimSpace(name), ":@/-")
 	parts := strings.Split(name, "/")
 	if len(parts) > 1 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") || parts[0] == "localhost") {
 		r.Registry = normalizeRegistry(parts[0])

@@ -14,6 +14,7 @@
     },
     "diagnostics": 0,
     "unresolved": 0,
+    "ignored": 0,
     "complete": true
   },
   "findings": [

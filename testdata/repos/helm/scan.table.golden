@@ -4,4 +4,4 @@ values.yaml:6:15   DSD-IMG-001  high      confirmed   high     docker.io/bitnami
 values.yaml:4:26   DSD-CFG-001  high      confirmed   unknown  true
 Chart.yaml:7:17    DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
 values.yaml:10:17  DSD-IMG-003  medium    confirmed   low      docker.io/bitnami/postgres-exporter:latest
-scanned 3 files, skipped 0, findings 5 (high 3, medium 2, low 0), diagnostics 0, unresolved 0
+scanned 3 files, skipped 0, findings 5 (high 3, medium 2, low 0), diagnostics 0, unresolved 0, ignored 0

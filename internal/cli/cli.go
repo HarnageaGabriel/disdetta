@@ -10,6 +10,7 @@ import (
 	"github.com/HarnageaGabriel/disdetta/internal/scan/repo"
 	"github.com/spf13/cobra"
 	"io"
+	"time"
 )
 
 const (
@@ -49,7 +50,7 @@ func newVersionCmd(streams IO) *cobra.Command {
 	return &cobra.Command{Use: "version", Short: "Print version information", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { _, e := fmt.Fprintln(streams.Out, "disdetta dev"); return e }}
 }
 func newScanCmd(streams IO) *cobra.Command {
-	format, failOn := "table", "low"
+	format, failOn, config := "table", "low", ""
 	var rules []string
 	cmd := &cobra.Command{Use: "scan [path]", Short: "Find Bitnami references in a repository", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if format != "table" && format != "json" {
@@ -70,7 +71,7 @@ func newScanCmd(streams IO) *cobra.Command {
 		if len(args) == 1 {
 			path = args[0]
 		}
-		result, e := repo.Scan(cmd.Context(), path)
+		result, e := repo.ScanWithOptions(cmd.Context(), path, repo.Options{ConfigPath: config, Clock: time.Now})
 		if e != nil {
 			return &exitError{ExitError, e}
 		}
@@ -105,6 +106,7 @@ func newScanCmd(streams IO) *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "table", "output format: table or json")
 	cmd.Flags().StringVar(&failOn, "fail-on", "low", "failure threshold: high, medium, low, or none")
 	cmd.Flags().StringArrayVar(&rules, "rule", nil, "include finding rule ID (repeatable)")
+	cmd.Flags().StringVar(&config, "config", "", "ignore configuration file (default .disdetta.yaml at scan root)")
 	return cmd
 }
 func parseThreshold(v string) (int, bool) {

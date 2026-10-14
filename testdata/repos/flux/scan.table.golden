@@ -1,4 +1,4 @@
 LOCATION               RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
 repository.yaml:16:19  DSD-IMG-002  high      confirmed   high     docker.io/bitnami/redis:7
 repository.yaml:7:8    DSD-CHT-001  medium    confirmed   unknown  oci://registry-1.docker.io/bitnamicharts
-scanned 1 files, skipped 0, findings 2 (high 1, medium 1, low 0), diagnostics 0, unresolved 0
+scanned 1 files, skipped 0, findings 2 (high 1, medium 1, low 0), diagnostics 0, unresolved 0, ignored 0

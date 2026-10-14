@@ -1,0 +1,8 @@
+jobs:
+  test:
+    container: bitnami/go:1
+    services:
+      redis:
+        image: bitnami/redis:7
+    steps:
+      - uses: docker://bitnami/kubectl:1

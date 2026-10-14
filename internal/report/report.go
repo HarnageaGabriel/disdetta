@@ -32,7 +32,7 @@ func Table(w io.Writer, r diag.Report) error {
 		}
 	}
 	s := r.Summary
-	if _, e := fmt.Fprintf(tw, "scanned %d files, skipped %d, findings %d (high %d, medium %d, low %d), diagnostics %d, unresolved %d\n", s.FilesScanned, s.FilesSkipped, s.Findings.High+s.Findings.Medium+s.Findings.Low, s.Findings.High, s.Findings.Medium, s.Findings.Low, s.Diagnostics, s.Unresolved); e != nil {
+	if _, e := fmt.Fprintf(tw, "scanned %d files, skipped %d, findings %d (high %d, medium %d, low %d), diagnostics %d, unresolved %d, ignored %d\n", s.FilesScanned, s.FilesSkipped, s.Findings.High+s.Findings.Medium+s.Findings.Low, s.Findings.High, s.Findings.Medium, s.Findings.Low, s.Diagnostics, s.Unresolved, s.Ignored); e != nil {
 		return e
 	}
 	return tw.Flush()

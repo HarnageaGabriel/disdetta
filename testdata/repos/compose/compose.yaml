@@ -1,0 +1,5 @@
+services:
+  database:
+    image: bitnami/postgresql:16
+x-unrelated:
+  image: bitnami/not-a-service:1

@@ -1,0 +1,4 @@
+LOCATION             RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
+.gitlab-ci.yml:6:7   DSD-IMG-002  high      confirmed   high    docker.io/bitnami/redis:7
+.gitlab-ci.yml:3:11  DSD-IMG-002  high      confirmed   medium  docker.io/bitnami/base:1
+scanned 1 files, skipped 0, findings 2 (high 2, medium 0, low 0), diagnostics 0, unresolved 0, ignored 0

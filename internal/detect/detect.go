@@ -41,7 +41,7 @@ func YAML(path string, data []byte) diag.Report {
 			continue
 		}
 		s := walkState{path: path, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out}
-		s.walk(root, 0, 0, false)
+		s.scanDocument(root)
 	}
 	return out
 }
@@ -169,31 +169,80 @@ func (s *walkState) addRef(r imageref.Reference, line, column int, embedded bool
 	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: rule, Severity: sev, Confidence: confidence, Impact: catalog.Impact(r.Component()), Component: r.Component(), Location: loc(s.path, line, column), Reference: r.Safe, Original: r.SafeOriginal, Attributes: attrs})
 }
 
-// Dockerfile detects image references in FROM instructions.
+// Dockerfile detects image references in FROM and external COPY instructions.
 func Dockerfile(path string, data []byte) diag.Report {
 	var out diag.Report
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), maxDockerfileLine)
-	line := 0
+	line, start := 0, 0
 	s := walkState{path: path, out: &out}
+	args, stages := map[string]string{}, map[string]bool{}
+	seenFrom := false
+	logical := ""
 	for scanner.Scan() {
 		line++
-		f := strings.Fields(scanner.Text())
-		if len(f) < 2 || !strings.EqualFold(f[0], "FROM") {
+		part := strings.TrimSpace(scanner.Text())
+		if logical == "" {
+			start = line
+		}
+		continued := strings.HasSuffix(part, "\\")
+		part = strings.TrimSpace(strings.TrimSuffix(part, "\\"))
+		logical += " " + part
+		if continued {
 			continue
 		}
-		i := 1
-		for i < len(f) && strings.HasPrefix(f[i], "--") {
-			i++
+		f := strings.Fields(strings.TrimSpace(logical))
+		logical = ""
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
 		}
-		if i < len(f) {
-			s.addImage(f[i], line, 1, false)
+		if strings.EqualFold(f[0], "ARG") && len(f) >= 2 && !seenFrom {
+			name, value, ok := strings.Cut(f[1], "=")
+			if ok {
+				args[name] = value
+			}
+			continue
+		}
+		if strings.EqualFold(f[0], "FROM") {
+			seenFrom = true
+			i := 1
+			for i < len(f) && strings.HasPrefix(f[i], "--") {
+				i++
+			}
+			if i < len(f) {
+				ref := expandDockerArgs(f[i], args)
+				s.addImage(ref, start, 1, false)
+				for j := i + 1; j+1 < len(f); j++ {
+					if strings.EqualFold(f[j], "AS") {
+						stages[strings.ToLower(f[j+1])] = true
+					}
+				}
+			}
+			continue
+		}
+		if strings.EqualFold(f[0], "COPY") {
+			for _, field := range f[1:] {
+				if strings.HasPrefix(strings.ToLower(field), "--from=") {
+					ref := strings.TrimSpace(field[len("--from="):])
+					if !stages[strings.ToLower(ref)] {
+						s.addImage(expandDockerArgs(ref, args), start, 1, false)
+					}
+				}
+			}
 		}
 	}
 	if scanner.Err() != nil {
 		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, line+1, 1, "Dockerfile line length limit reached"))
 	}
 	return out
+}
+
+func expandDockerArgs(v string, args map[string]string) string {
+	for name, value := range args {
+		v = strings.ReplaceAll(v, "${"+name+"}", value)
+		v = strings.ReplaceAll(v, "$"+name, value)
+	}
+	return v
 }
 func loc(path string, line, column int) diag.Location {
 	return diag.Location{Path: path, Line: line, Column: column}

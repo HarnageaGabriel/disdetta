@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 2,
+      "medium": 0,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "azure-pipelines.yml",
+        "line": 8,
+        "column": 14
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "b00fd4d6b0cc4559"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": "azure-pipelines.yml",
+        "line": 4,
+        "column": 14
+      },
+      "reference": "docker.io/bitnami/kubectl:1",
+      "original": "bitnami/kubectl:1",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "7d4422017945d6e3"
+    }
+  ],
+  "diagnostics": []
+}

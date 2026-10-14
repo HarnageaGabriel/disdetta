@@ -4,6 +4,7 @@ package repo
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/detect"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
@@ -14,14 +15,26 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var skippedDirectories = map[string]bool{".git": true, "node_modules": true, "vendor": true}
 
 const maxFileSize = 5 * 1024 * 1024
 
+// Options controls repository scanning integrations.
+type Options struct {
+	ConfigPath string
+	Clock      func() time.Time
+}
+
 // Scan walks root without changing it and returns a deterministic report.
 func Scan(ctx context.Context, root string) (diag.Report, error) {
+	return ScanWithOptions(ctx, root, Options{Clock: time.Now})
+}
+
+// ScanWithOptions walks root and applies ignores using the injected clock.
+func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Report, error) {
 	original := root
 	info, err := os.Lstat(root)
 	if err != nil {
@@ -101,12 +114,38 @@ func Scan(ctx context.Context, root string) (diag.Report, error) {
 		return diag.Report{}, fmt.Errorf("walk %s: %w", original, err)
 	}
 	finalize(&out)
+	configPath := options.ConfigPath
+	if configPath == "" {
+		configPath = filepath.Join(root, ".disdetta.yaml")
+	}
+	data, configErr := os.ReadFile(configPath)
+	if configErr == nil {
+		entries, e := parseIgnores(data)
+		if e != nil {
+			return diag.Report{}, e
+		}
+		now := time.Time{}
+		if options.Clock != nil {
+			now = options.Clock()
+		}
+		displayConfig := filepath.ToSlash(configPath)
+		if rel, e := filepath.Rel(root, configPath); e == nil && !strings.HasPrefix(rel, "..") {
+			displayConfig = filepath.ToSlash(rel)
+		}
+		applyIgnores(&out, entries, now, displayConfig)
+		finalize(&out)
+	} else if options.ConfigPath != "" || !errors.Is(configErr, os.ErrNotExist) {
+		return diag.Report{}, fmt.Errorf("read ignore file %s: %w", configPath, configErr)
+	}
 	return out, nil
 }
 func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	lower := strings.ToLower(info.Name())
+	if lower == ".disdetta.yaml" {
+		return out
+	}
 	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
-	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.")
+	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile")
 	if !yamlFile && !dockerfile {
 		return out
 	}
@@ -160,6 +199,7 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 func appendReport(dst *diag.Report, src diag.Report) {
 	dst.Summary.FilesScanned += src.Summary.FilesScanned
 	dst.Summary.FilesSkipped += src.Summary.FilesSkipped
+	dst.Summary.Ignored += src.Summary.Ignored
 	dst.Findings = append(dst.Findings, src.Findings...)
 	dst.Diagnostics = append(dst.Diagnostics, src.Diagnostics...)
 }
@@ -175,8 +215,10 @@ func finalize(r *diag.Report) {
 		key := f.RuleID + "\x00" + f.Location.Path + "\x00" + f.Reference
 		n := occ[key]
 		occ[key] = n + 1
-		sum := sha256.Sum256([]byte(key + "\x00" + strconv.Itoa(n)))
-		f.Fingerprint = fmt.Sprintf("%x", sum[:8])
+		if f.Fingerprint == "" {
+			sum := sha256.Sum256([]byte(key + "\x00" + strconv.Itoa(n)))
+			f.Fingerprint = fmt.Sprintf("%x", sum[:8])
+		}
 		if f.Attributes == nil {
 			f.Attributes = []string{}
 		}
