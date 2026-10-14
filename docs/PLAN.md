@@ -27,10 +27,10 @@ Orthogonal attributes (not severities): `stateful` (PostgreSQL, Redis, Valkey, K
 
 ## Milestones (revised order)
 - M0 scaffold: module, CLI skeleton, `diag` registry, CI, lint, docs. **Done** (PR feat/scan-mvp).
-- M1a `scan` repo, first cut + security hardening. **Done**, in review.
-- M1b `scan` repo coverage: partial templates (`bitnami/redis:{{ .tag }}` still classified), `${VAR}` in Dockerfile/CI, `ARG` defaults, `COPY --from`, line continuations, GitLab/Azure/Kustomize/compose, YAML aliases, `--fail-on <severity>`, baseline/ignore file with expiry. *Before any cluster work: false negatives here undermine trust in everything else.*
-- M1c Real-world corpus: anonymized fixtures from public GitOps repositories (license-checked), measuring recall. Prerequisite for claiming coverage.
-- M2 `scan` cluster, read-only, three tiers by privilege:
+- M1a `scan` repo, first cut + security hardening. **Done** (merged 2026-10-14).
+- M1b **Done** (merged 2026-10-14). `scan` repo coverage: partial templates (`bitnami/redis:{{ .tag }}` still classified), `${VAR}` in Dockerfile/CI, `ARG` defaults, `COPY --from`, line continuations, GitLab/Azure/Kustomize/compose, YAML aliases, `--fail-on <severity>`, baseline/ignore file with expiry. *Before any cluster work: false negatives here undermine trust in everything else.*
+- M1c **Done** for Helm-heavy repositories ([corpus.md](corpus.md); CI/Kustomize/Argo repositories wanted, issue #16). Real-world corpus: anonymized fixtures from public GitOps repositories (license-checked), measuring recall. Prerequisite for claiming coverage.
+- M2 **In progress**, contract in [spec/v0.2-cluster.md](spec/v0.2-cluster.md), ADR 0007. `scan` cluster, read-only, three tiers by privilege:
   1. workload pod templates (Deployment, StatefulSet, DaemonSet, Job, CronJob), not only running Pods, so scaled-to-zero and CronJobs are not missed; `status.imageID` to expose mirrors;
   2. Helm release metadata from labels (`owner=helm`) and chart origin;
   3. **opt-in** (`--read-helm-secrets`): decode release Secrets for chart origin and user values. These Secrets can contain credentials: redact at decode time, never print values, document the RBAC needed.
