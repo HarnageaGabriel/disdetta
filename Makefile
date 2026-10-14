@@ -12,6 +12,7 @@ vuln:
 	govulncheck ./...
 cover:
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
+	sh scripts/cover-floors.sh
 tidy:
 	go mod tidy
 fmt:

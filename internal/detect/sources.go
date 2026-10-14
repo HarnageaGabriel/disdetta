@@ -59,6 +59,9 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 	before := len(s.out.Findings)
 	s.scanFallbacks(root)
 	s.dropDuplicateFallbacks(before)
+	// An anchor and its alias uses are one logical reference, reported once at
+	// the anchor (spec section 5).
+	s.out.Findings = diag.DedupeFindings(s.out.Findings)
 }
 
 func (s *walkState) scanCharts(root *yaml.Node) {
@@ -87,10 +90,18 @@ func (s *walkState) scanVendoredChart(root *yaml.Node) {
 			evidence = home
 		}
 	}
+	attrs := []string{"chart"}
 	if evidence != nil {
 		reference = strings.TrimSpace(evidence.Value)
 	} else {
-		evidence, reference, confidence = bitnamiAnnotationImage(nodeAt(root, "annotations", "images"))
+		var r imageref.Reference
+		evidence, r, confidence = bitnamiAnnotationImage(nodeAt(root, "annotations", "images"))
+		if evidence != nil {
+			reference = r.Safe
+			if r.Registry != "" && r.Registry != "docker.io" {
+				attrs = append(attrs, "mirror")
+			}
+		}
 	}
 	if evidence == nil {
 		return
@@ -99,7 +110,7 @@ func (s *walkState) scanVendoredChart(root *yaml.Node) {
 	if component != "" {
 		impact = catalog.Impact(component)
 	}
-	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-002", Severity: diag.SeverityMedium, Confidence: confidence, Impact: impact, Component: component, Location: loc(s.path, evidence.Line, evidence.Column), Reference: reference, Original: reference, Attributes: []string{"chart"}})
+	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-002", Severity: diag.SeverityMedium, Confidence: confidence, Impact: impact, Component: component, Location: loc(s.path, evidence.Line, evidence.Column), Reference: reference, Original: reference, Attributes: attrs})
 }
 
 func isBitnamiChartsURL(v string) bool {
@@ -109,8 +120,9 @@ func isBitnamiChartsURL(v string) bool {
 
 // bitnamiAnnotationImage returns the images node, the first Bitnami image in an
 // annotations.images list, and its confidence. One finding per chart, never one
-// per annotation line.
-func bitnamiAnnotationImage(n *yaml.Node) (*yaml.Node, string, diag.Confidence) {
+// per annotation line. A templated image is unresolved, an image from another
+// registry is inferred, and only Docker Hub is confirmed (spec section 2.2).
+func bitnamiAnnotationImage(n *yaml.Node) (*yaml.Node, imageref.Reference, diag.Confidence) {
 	evidence := n
 	for _, entry := range annotationEntries(n) {
 		image := ""
@@ -126,13 +138,15 @@ func bitnamiAnnotationImage(n *yaml.Node) (*yaml.Node, string, diag.Confidence) 
 		if !r.HasStaticEvidence {
 			continue
 		}
-		confidence := diag.ConfidenceConfirmed
-		if r.Registry != "docker.io" && !r.Templated {
-			confidence = diag.ConfidenceInferred
+		switch {
+		case r.Templated:
+			return evidence, r, diag.ConfidenceUnresolved
+		case r.Registry != "" && r.Registry != "docker.io":
+			return evidence, r, diag.ConfidenceInferred
 		}
-		return evidence, r.Safe, confidence
+		return evidence, r, diag.ConfidenceConfirmed
 	}
-	return nil, "", ""
+	return nil, imageref.Reference{}, ""
 }
 
 func annotationEntries(n *yaml.Node) []*yaml.Node {
@@ -166,10 +180,14 @@ func (s *walkState) scanArgo(spec *yaml.Node) {
 		chart := valueAt(src, "chart")
 		s.addChartAt(nodeAt(src, "repoURL"), chart)
 		before := len(s.out.Findings)
-		if v := nodeAt(src, "helm", "values"); v != nil && v.Kind == yaml.ScalarNode {
+		if v := nodeAt(src, "helm", "values"); v != nil && v.Kind == yaml.ScalarNode && strings.TrimSpace(v.Value) != "" {
 			var embedded yaml.Node
-			if yaml.Unmarshal([]byte(v.Value), &embedded) == nil && len(embedded.Content) > 0 {
-				s.scanImagesAt(embedded.Content[0], true, v.Line, v.Column, map[*yaml.Node]bool{}, new(int))
+			if err := yaml.Unmarshal([]byte(v.Value), &embedded); err != nil || len(embedded.Content) == 0 {
+				// A malformed embedded values block is never dropped silently
+				// (spec sections 3, 5; review 02 F1).
+				s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-001", diag.LevelError, s.path, embeddedLineOffset(v)+1, v.Column, "malformed embedded values"))
+			} else {
+				s.scanImagesAt(embedded.Content[0], true, embeddedLineOffset(v), map[*yaml.Node]bool{}, new(int))
 			}
 		}
 		s.scanImages(nodeAt(src, "helm", "valuesObject"), true)
@@ -299,47 +317,74 @@ func (s *walkState) addChartAt(n *yaml.Node, component string) {
 	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: impact, Component: component, Location: loc(s.path, n.Line, n.Column), Reference: strings.TrimSpace(n.Value), Original: strings.TrimSpace(n.Value), Attributes: []string{"chart"}})
 }
 func (s *walkState) scanImages(n *yaml.Node, embedded bool) {
-	s.scanImagesAt(n, embedded, 0, 0, map[*yaml.Node]bool{}, new(int))
+	s.scanImagesAt(n, embedded, 0, map[*yaml.Node]bool{}, new(int))
 }
-func (s *walkState) scanImagesAt(n *yaml.Node, embedded bool, useLine, useCol int, seen map[*yaml.Node]bool, budget *int) {
-	if n == nil || *budget >= maxAliasNodes {
+
+// scanImagesAt walks a values-shaped subtree. lineOffset is how many lines the
+// walked content is shifted inside the file, so a reference embedded in a block
+// scalar keeps its own line instead of the values: marker line (spec 5).
+func (s *walkState) scanImagesAt(n *yaml.Node, embedded bool, lineOffset int, seen map[*yaml.Node]bool, budget *int) {
+	if n == nil {
 		return
 	}
-	*budget++
 	if n.Kind == yaml.AliasNode {
-		if seen[n.Alias] {
+		if n.Alias == nil || seen[n.Alias] {
 			return
 		}
+		if *budget >= maxAliasNodes {
+			// Only alias expansions consume the budget, so an ordinary large
+			// values file is never truncated (review 02 F2). Hitting the limit
+			// is a diagnostic, never a silent truncation (spec section 3).
+			if !s.aliasLimitReported {
+				s.aliasLimitReported = true
+				s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, s.path, n.Line, n.Column, "alias expansion limit reached"))
+			}
+			return
+		}
+		*budget++
 		seen[n.Alias] = true
-		s.scanImagesAt(n.Alias, embedded, n.Line, n.Column, seen, budget)
+		s.scanImagesAt(n.Alias, embedded, lineOffset, seen, budget)
 		delete(seen, n.Alias)
+		return
+	}
+	if isSecretMapping(n) {
 		return
 	}
 	if n.Kind == yaml.MappingNode {
 		if isImageTriple(n) {
-			s.scanSplitImage(n, embedded, useLine, useCol)
+			s.scanSplitImage(n, embedded, lineOffset)
 		}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
 			if k.Value == "<<" {
-				s.scanImagesAt(v, embedded, k.Line, k.Column, seen, budget)
+				s.scanImagesAt(v, embedded, lineOffset, seen, budget)
 			} else if k.Value == "image" && v.Kind == yaml.ScalarNode {
-				line, col := v.Line, v.Column
-				if useLine > 0 {
-					line, col = useLine, useCol
-				}
-				s.addImage(v.Value, line, col, embedded)
+				s.addImage(v.Value, v.Line+lineOffset, v.Column, embedded)
 			} else {
-				s.scanImagesAt(v, embedded, useLine, useCol, seen, budget)
+				s.scanImagesAt(v, embedded, lineOffset, seen, budget)
 			}
 		}
 		return
 	}
 	for _, c := range n.Content {
-		s.scanImagesAt(c, embedded, useLine, useCol, seen, budget)
+		s.scanImagesAt(c, embedded, lineOffset, seen, budget)
 	}
 }
-func (s *walkState) scanSplitImage(n *yaml.Node, embedded bool, line, col int) {
+
+// embeddedLineOffset returns the line number the first line of an embedded
+// scalar's content maps to: a block scalar's content starts below its marker,
+// an inline scalar's content starts on its own line.
+func embeddedLineOffset(v *yaml.Node) int {
+	if v.Style == yaml.LiteralStyle || v.Style == yaml.FoldedStyle {
+		return v.Line
+	}
+	if v.Line > 0 {
+		return v.Line - 1
+	}
+	return 0
+}
+
+func (s *walkState) scanSplitImage(n *yaml.Node, embedded bool, lineOffset int) {
 	repo := valueAt(n, "repository")
 	if repo == "" {
 		return
@@ -359,9 +404,9 @@ func (s *walkState) scanSplitImage(n *yaml.Node, embedded bool, line, col int) {
 	if d := valueAt(n, "digest"); d != "" {
 		ref += "@" + d
 	}
-	rn := nodeAt(n, "repository")
-	if line == 0 {
-		line, col = rn.Line, rn.Column
+	line, col := 0, 0
+	if rn := nodeAt(n, "repository"); rn != nil {
+		line, col = rn.Line+lineOffset, rn.Column
 	}
 	s.addImage(ref, line, col, embedded)
 }

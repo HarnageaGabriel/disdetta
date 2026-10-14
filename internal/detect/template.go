@@ -34,6 +34,7 @@ func Malformed(r diag.Report) bool {
 // Template scans Helm template text line by line (spec section 9.1). It never
 // prints a template body: only the static part of a reference is reported.
 func Template(path string, data []byte) diag.Report {
+	data = stripBOM(data)
 	var out diag.Report
 	out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-007", diag.LevelInfo, path, 0, 0, "file read as template text"))
 	s := walkState{path: path, out: &out}

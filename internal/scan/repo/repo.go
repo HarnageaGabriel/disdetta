@@ -20,7 +20,8 @@ import (
 
 var skippedDirectories = map[string]bool{".git": true, "node_modules": true, "vendor": true}
 
-const maxFileSize = 5 * 1024 * 1024
+// MaxFileSize is the largest file scanned; larger files produce DSD-SCN-008.
+const MaxFileSize = 16 * 1024 * 1024
 
 // Options controls repository scanning integrations.
 type Options struct {
@@ -51,7 +52,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 			return diag.Report{}, fmt.Errorf("scan %s: %w", root, e)
 		}
 		if !resolvedInfo.IsDir() {
-			r := diag.Report{Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "symbolic-link root file skipped")}}
+			r := diag.Report{Summary: diag.Summary{FilesSkipped: 1}, Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "symbolic-link root file skipped")}}
 			finalize(&r)
 			return r, nil
 		}
@@ -59,7 +60,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 	}
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
-			r := diag.Report{Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "non-regular file skipped")}}
+			r := diag.Report{Summary: diag.Summary{FilesSkipped: 1}, Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "non-regular file skipped")}}
 			finalize(&r)
 			return r, nil
 		}
@@ -108,6 +109,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 			return nil
 		}
 		if !entryInfo.Mode().IsRegular() {
+			out.Summary.FilesSkipped++
 			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "non-regular file skipped"))
 			return nil
 		}
@@ -132,7 +134,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 		if options.Clock != nil {
 			now = options.Clock()
 		}
-		displayConfig := filepath.ToSlash(configPath)
+		displayConfig := filepath.Base(configPath)
 		if rel, e := filepath.Rel(root, configPath); e == nil && !strings.HasPrefix(rel, "..") {
 			displayConfig = filepath.ToSlash(rel)
 		}
@@ -154,9 +156,9 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	if !yamlFile && !dockerfile && !templateText {
 		return out
 	}
-	if info.Size() > maxFileSize {
+	if info.Size() > MaxFileSize {
 		out.Summary.FilesSkipped++
-		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "file exceeds 5 MiB limit; skipped")}
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-008", diag.LevelError, display, "file exceeds 16 MiB limit; skipped")}
 		return out
 	}
 	file, err := os.Open(path)
@@ -180,15 +182,15 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "file changed or became non-regular; skipped")}
 		return out
 	}
-	data, e := io.ReadAll(io.LimitReader(file, maxFileSize+1))
+	data, e := io.ReadAll(io.LimitReader(file, MaxFileSize+1))
 	if e != nil {
 		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file could not be read")}
 		return out
 	}
 	readOK = true
-	if len(data) > maxFileSize {
+	if len(data) > MaxFileSize {
 		out.Summary.FilesSkipped++
-		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "file exceeds 5 MiB limit; skipped")}
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-008", diag.LevelError, display, "file exceeds 16 MiB limit; skipped")}
 		return out
 	}
 	out.Summary.FilesScanned = 1
@@ -248,8 +250,13 @@ func scanDiagnostic(code string, level diag.Level, path, message string) diag.Di
 	return diag.Diagnostic{Code: code, Level: level, Message: message, Location: diag.Location{Path: path}}
 }
 
-// Finalize calculates fingerprints, summary fields, and contract ordering.
+// Finalize de-duplicates findings, applies contract ordering, and then assigns
+// fingerprints and summary fields. Occurrences are numbered after sorting, in
+// source order, so detector map iteration order never reaches the output
+// (spec sections 4, 5).
 func finalize(r *diag.Report) {
+	r.Findings = diag.DedupeFindings(r.Findings)
+	Sort(r)
 	occ := map[string]int{}
 	for i := range r.Findings {
 		f := &r.Findings[i]
@@ -264,7 +271,6 @@ func finalize(r *diag.Report) {
 			f.Attributes = []string{}
 		}
 	}
-	Sort(r)
 	r.Summary.Findings = diag.FindingCounts{}
 	r.Summary.Unresolved = 0
 	for _, f := range r.Findings {
@@ -275,9 +281,6 @@ func finalize(r *diag.Report) {
 			r.Summary.Findings.Medium++
 		case diag.SeverityLow:
 			r.Summary.Findings.Low++
-		}
-		if f.Confidence == diag.ConfidenceUnresolved {
-			r.Summary.Unresolved++
 		}
 	}
 	r.Summary.Diagnostics = len(r.Diagnostics)

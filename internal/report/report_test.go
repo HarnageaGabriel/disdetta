@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"strings"
 	"testing"
@@ -32,5 +33,78 @@ func TestJSONEnvelope(t *testing.T) {
 		if _, ok := v[key]; !ok {
 			t.Errorf("source docs/spec/v0.1.md section 8: missing %s", key)
 		}
+	}
+}
+
+// review 02 F15: Unicode format characters (category Cf) must be escaped, not
+// emitted raw, so they cannot forge a table row (spec section 6).
+func TestTableEscapesFormatCharacters(t *testing.T) {
+	r := diag.Report{Findings: []diag.Finding{{RuleID: "DSD-IMG-003", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactLow, Location: diag.Location{Path: "a\u202eb.yaml", Line: 1}, Reference: "bitnami/redis\u200b:7"}}}
+	var b bytes.Buffer
+	if err := Table(&b, r); err != nil {
+		t.Fatal(err)
+	}
+	s := b.String()
+	if strings.ContainsRune(s, '\u202e') || strings.ContainsRune(s, '\u200b') {
+		t.Fatalf("review 02 F15: raw format character in %q", s)
+	}
+	if !strings.Contains(s, "\\u202e") || !strings.Contains(s, "\\u200b") {
+		t.Fatalf("review 02 F15: not escaped in %q", s)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("boom") }
+
+// Renders diagnostics (warning and error only), location variants, and the
+// writer error path (spec section 8).
+func TestTableRendersDiagnosticsAndLocationVariants(t *testing.T) {
+	r := diag.Report{
+		Summary:  diag.Summary{Complete: false},
+		Findings: []diag.Finding{{RuleID: "DSD-IMG-001", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactHigh, Location: diag.Location{Path: "a.yaml", Line: 2}, Reference: "docker.io/bitnamilegacy/redis:7"}},
+		Diagnostics: []diag.Diagnostic{
+			{Code: "DSD-SCN-002", Level: diag.LevelWarning, Message: "symbolic link skipped", Location: diag.Location{Path: "b.yaml"}},
+			{Code: "DSD-SCN-001", Level: diag.LevelError, Message: "malformed YAML", Location: diag.Location{Path: "c.yaml", Line: 4, Column: 2}},
+			{Code: "DSD-SCN-003", Level: diag.LevelInfo, Message: "unresolved reference", Location: diag.Location{Path: "d.yaml"}},
+			{Code: "DSD-SCN-008", Level: diag.LevelError, Message: "file exceeds 16 MiB limit; skipped", Location: diag.Location{Path: "e.yaml"}},
+		},
+	}
+	var b bytes.Buffer
+	if err := Table(&b, r); err != nil {
+		t.Fatal(err)
+	}
+	s := b.String()
+	if !strings.Contains(s, "b.yaml") || !strings.Contains(s, "c.yaml:4:2") || !strings.Contains(s, "a.yaml:2") || !strings.Contains(s, "e.yaml") {
+		t.Fatalf("source docs/spec/v0.1.md section 8: %q", s)
+	}
+	if strings.Contains(s, "d.yaml") {
+		t.Fatalf("source docs/spec/v0.1.md section 8: info diagnostic rendered: %q", s)
+	}
+	if err := Table(failingWriter{}, r); err == nil {
+		t.Fatal("source docs/spec/v0.1.md section 8: write error not returned")
+	}
+}
+
+// review 02 F15: quotes, backslashes and invalid UTF-8 bytes are escaped
+// so no cell can forge a row (spec section 6).
+func TestSafeCellEscapesQuotesAndInvalidUTF8(t *testing.T) {
+	r := diag.Report{Findings: []diag.Finding{{RuleID: "a\"b\\c", Severity: diag.SeverityLow, Confidence: diag.ConfidenceInferred, Impact: diag.ImpactUnknown, Location: diag.Location{Path: "p"}, Reference: "p\xffq"}}}
+	var b bytes.Buffer
+	if err := Table(&b, r); err != nil {
+		t.Fatal(err)
+	}
+	s := b.String()
+	if strings.Contains(s, "\xff") || !strings.Contains(s, `p\xffq`) {
+		t.Fatalf("review 02 F15: invalid UTF-8 not escaped: %q", s)
+	}
+	if !strings.Contains(s, `a\"b\\c`) {
+		t.Fatalf("review 02 F15: quotes not escaped: %q", s)
+	}
+}
+
+func TestJSONWriteError(t *testing.T) {
+	if err := JSON(failingWriter{}, diag.Report{}); err == nil {
+		t.Fatal("source docs/spec/v0.1.md section 8: write error not returned")
 	}
 }

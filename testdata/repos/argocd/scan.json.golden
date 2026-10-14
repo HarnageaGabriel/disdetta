@@ -26,7 +26,7 @@
       "component": "redis",
       "location": {
         "path": "application.yaml",
-        "line": 10,
+        "line": 12,
         "column": 15
       },
       "reference": "docker.io/bitnamilegacy/redis:7",

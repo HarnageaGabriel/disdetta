@@ -2,7 +2,6 @@
 package imageref
 
 import (
-	"regexp"
 	"strings"
 	"unicode"
 )
@@ -18,7 +17,9 @@ const (
 	Unresolved    Classification = "unresolved"
 )
 
-var templatePattern = regexp.MustCompile(`\{\{[\s\S]*?\}\}|\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
+// templatePlaceholder replaces each templated segment in redacted output
+// (spec section 6). The ellipsis is U+2026.
+const templatePlaceholder = "{{…}}"
 
 // Reference is a normalized, safely printable image reference.
 type Reference struct {
@@ -33,8 +34,8 @@ type Reference struct {
 // Parse parses a Docker-style image reference sufficiently for deterministic detection.
 func Parse(value string) Reference {
 	original := strings.TrimSpace(value)
-	safeOriginal := templatePattern.ReplaceAllString(original, "{{…}}")
-	static := templatePattern.ReplaceAllString(original, "")
+	safeOriginal := redactTemplates(original)
+	static, _ := stripTemplates(original)
 	templated := static != original
 	name := strings.TrimSpace(static)
 	name = stripUserinfo(name)
@@ -167,18 +168,113 @@ func render(r Reference) string {
 	return v
 }
 func templateSuffix(v string) string {
-	idx := templatePattern.FindStringIndex(v)
-	if idx == nil {
+	start, _, ok := templateSegment(v, 0)
+	if !ok {
 		return ""
 	}
-	prefix := v[:idx[0]]
+	prefix := v[:start]
 	sep := ""
 	if strings.HasSuffix(prefix, ":") {
 		sep = ":"
 	} else if strings.HasSuffix(prefix, "@") {
 		sep = "@"
 	}
-	return sep + strings.Join(make([]string, len(templatePattern.FindAllString(v, -1))), "{{…}}") + "{{…}}"
+	_, count := stripTemplates(v)
+	if count == 0 {
+		return ""
+	}
+	return sep + strings.Repeat(templatePlaceholder, count)
+}
+
+// templateSegment returns the next template segment in s at or after from as a
+// half-open byte range, and whether one was found. A {{ ... }} action is closed
+// by its own }} so a }} inside a quoted string in the action body can never
+// truncate the segment and leak the template tail (spec section 6).
+func templateSegment(s string, from int) (int, int, bool) {
+	for i := from; i < len(s); i++ {
+		switch {
+		case s[i] == '{' && i+1 < len(s) && s[i+1] == '{':
+			if end, ok := templateActionEnd(s, i+2); ok {
+				return i, end, true
+			}
+		case s[i] == '$' && i+1 < len(s) && s[i+1] == '{':
+			if j := strings.IndexByte(s[i+2:], '}'); j >= 0 {
+				return i, i + j + 3, true
+			}
+		case s[i] == '$':
+			j := i + 1
+			for j < len(s) && isTemplateNameByte(s[j]) {
+				j++
+			}
+			if j > i+1 {
+				return i, j, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// templateActionEnd returns the index just past the }} that closes an action
+// whose body starts at from, skipping quoted string and raw string literals.
+func templateActionEnd(s string, from int) (int, bool) {
+	for i := from; i < len(s); i++ {
+		switch s[i] {
+		case '"', '`':
+			quote := s[i]
+			i++
+			for i < len(s) && s[i] != quote {
+				if quote == '"' && s[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			if i >= len(s) {
+				return 0, false
+			}
+		case '}':
+			if i+1 < len(s) && s[i+1] == '}' {
+				return i + 2, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// stripTemplates removes each template segment and reports how many were found.
+func stripTemplates(s string) (string, int) {
+	var b strings.Builder
+	count := 0
+	for i := 0; ; {
+		start, end, ok := templateSegment(s, i)
+		if !ok {
+			b.WriteString(s[i:])
+			break
+		}
+		b.WriteString(s[i:start])
+		count++
+		i = end
+	}
+	return b.String(), count
+}
+
+// redactTemplates replaces each template segment with templatePlaceholder.
+func redactTemplates(s string) string {
+	var b strings.Builder
+	for i := 0; ; {
+		start, end, ok := templateSegment(s, i)
+		if !ok {
+			b.WriteString(s[i:])
+			break
+		}
+		b.WriteString(s[i:start])
+		b.WriteString(templatePlaceholder)
+		i = end
+	}
+	return b.String()
+}
+
+func isTemplateNameByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 func stripUserinfo(v string) string {
 	if at := strings.LastIndexByte(v, '@'); at >= 0 {

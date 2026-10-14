@@ -20,7 +20,7 @@ Status: draft (2026-10-14), required before the cluster scan ships. Scope: `disd
 | T1 | Secret leaked to stdout, CI logs, JSON or SARIF | Only the reference itself is printed; nothing under a Kubernetes `Secret`; userinfo stripped; template bodies replaced by `{{...}}`; redaction tests per rule | Done (repo scan) |
 | T2 | Helm release Secrets read with broad RBAC, payload exposed | Opt-in `--read-helm-secrets`; decode in memory only; redact `config` before any diagnostic; never cache to disk; document the exact RBAC (`get`/`list` on Secrets of type `helm.sh/release.v1` only, by label selector `owner=helm`) | Planned (M2) |
 | T3 | Decompression bomb in a Helm release payload | Bounded gzip reader (size cap and ratio cap), payload size cap before base64 decode, per-object time budget | Planned (M2) |
-| T4 | Hostile YAML: deep nesting, alias explosion ("billion laughs"), huge files | File size cap (5 MiB), depth cap (256), alias node budget with cycle guard, per-file errors are diagnostics | Done |
+| T4 | Hostile YAML: deep nesting, alias explosion ("billion laughs"), huge files | File size cap (16 MiB), depth cap (256), alias node budget with cycle guard, per-file errors are diagnostics | Done |
 | T5 | Filesystem escape through symlinks, special files, path traversal in reported paths | Symlinks and non-regular files skipped and reported; paths reported relative to the root, slash-separated; no file is ever written | Done |
 | T6 | Terminal injection through file names or values (ANSI escapes, newlines forging rows) | Control characters escaped in every table cell; JSON encoding escapes by construction | Done |
 | T7 | Incomplete scan reported as clean | Exit code 3 on error-level diagnostics; summary always printed with `complete` | Done |

@@ -25,8 +25,8 @@ func TestSection9YAMLSources(t *testing.T) {
 		{"azure unrelated negative", "azure-pipelines.yml", "variables: {image: bitnami/not-container:1}\n", 0},
 		{"values variable evidence", "values.yaml", "image: '${REGISTRY}/bitnami/redis:${TAG}'\n", 1},
 		{"unrelated yaml negative", "tool.yaml", "settings: {image: bitnami/not-container:1}\n", 0},
-		// Alias expansion reports the semantic alias at the *common use site.
-		{"alias use site", "values.yaml", "common: &common\n  image: bitnami/redis:7\nfirst: *common\n", 2},
+		// review 02 F12: an anchor and its alias uses are one finding at the anchor.
+		{"alias anchor", "values.yaml", "common: &common\n  image: bitnami/redis:7\nfirst: *common\n", 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

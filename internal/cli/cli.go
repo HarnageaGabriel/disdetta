@@ -143,9 +143,6 @@ func recount(r *diag.Report) {
 		case diag.SeverityLow:
 			r.Summary.Findings.Low++
 		}
-		if f.Confidence == diag.ConfidenceUnresolved {
-			unresolved++
-		}
 	}
 	for _, d := range r.Diagnostics {
 		if d.Code == "DSD-SCN-003" {

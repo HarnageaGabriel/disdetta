@@ -64,3 +64,32 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// review 02 F13: a }} inside a quoted string of a template action must not end
+// the redaction early and leak the template tail (spec section 6).
+func TestTemplateRedactionKeepsQuotedBraces(t *testing.T) {
+	r := Parse(`bitnami/redis:{{ printf "%s}}" .Values.tag }}`)
+	if r.Safe != "docker.io/bitnami/redis:{{…}}" {
+		t.Fatalf("review 02 F13: safe=%q", r.Safe)
+	}
+	if strings.Contains(r.SafeOriginal, "Values") || strings.Contains(r.SafeOriginal, "printf") {
+		t.Fatalf("review 02 F13: leaked template body %q", r.SafeOriginal)
+	}
+}
+
+// Join and the dollar-template forms round out the reference parser.
+func TestJoinAndDollarTemplates(t *testing.T) {
+	r := Join("registry.example", "bitnami/redis", "${TAG}")
+	if !r.Templated || r.Safe != "registry.example/bitnami/redis:{{…}}" {
+		t.Fatalf("source docs/spec/v0.1.md section 2.2: %q", r.Safe)
+	}
+	if r := Parse("bitnami/redis@{{ .Values.digest }}"); r.Safe != "docker.io/bitnami/redis@{{…}}" {
+		t.Fatalf("source docs/spec/v0.1.md section 2.2: %q", r.Safe)
+	}
+	if r := Parse("bitnami/redis@sha256:abc"); r.SafeOriginal != "bitnami/redis@sha256:abc" || r.Digest != "sha256:abc" || r.Classification != Bitnami {
+		t.Fatalf("source docs/spec/v0.1.md section 2.2: %#v", r)
+	}
+	if r := Parse(""); r.Safe != "" || r.Classification != Other {
+		t.Fatalf("source docs/spec/v0.1.md section 2.2: %#v", r)
+	}
+}

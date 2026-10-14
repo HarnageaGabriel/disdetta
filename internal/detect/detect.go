@@ -22,6 +22,7 @@ const (
 
 // YAML inspects all YAML documents and retains one-based positions.
 func YAML(path string, data []byte) diag.Report {
+	data = stripBOM(data)
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var out diag.Report
 	for {
@@ -48,12 +49,13 @@ func YAML(path string, data []byte) diag.Report {
 }
 
 type walkState struct {
-	path            string
-	keys            []string
-	globalRegistry  string
-	depthReported   bool
-	templateComment bool
-	out             *diag.Report
+	path               string
+	keys               []string
+	globalRegistry     string
+	depthReported      bool
+	aliasLimitReported bool
+	templateComment    bool
+	out                *diag.Report
 }
 
 func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
@@ -62,6 +64,9 @@ func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
 			s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, s.path, n.Line+lineOffset, n.Column, "YAML depth limit reached"))
 			s.depthReported = true
 		}
+		return
+	}
+	if isSecretMapping(n) {
 		return
 	}
 	if n.Kind == yaml.MappingNode {
@@ -101,9 +106,9 @@ func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
 			if k.Value == "values" && v.Kind == yaml.ScalarNode && strings.TrimSpace(v.Value) != "" {
 				var sub yaml.Node
 				if err := yaml.Unmarshal([]byte(v.Value), &sub); err != nil {
-					s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-001", diag.LevelError, s.path, v.Line+lineOffset+1, v.Column, "malformed embedded values"))
+					s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-001", diag.LevelError, s.path, embeddedLineOffset(v)+lineOffset+1, v.Column, "malformed embedded values"))
 				} else if len(sub.Content) > 0 {
-					s.walk(sub.Content[0], v.Line+lineOffset, depth+1, true)
+					s.walk(sub.Content[0], embeddedLineOffset(v)+lineOffset, depth+1, true)
 				}
 			}
 			s.walk(v, lineOffset, depth+1, embedded)
@@ -163,11 +168,22 @@ func (s *walkState) addRefConfidence(r imageref.Reference, line, column int, emb
 	switch r.Classification {
 	case imageref.BitnamiLegacy:
 		rule = "DSD-IMG-001"
-	case imageref.Bitnami, imageref.BitnamiSecure:
+	case imageref.BitnamiSecure:
 		switch {
 		case r.Registry != "" && r.Registry != "docker.io":
 			// A Bitnami namespace under another registry is a mirror or a
 			// rebuild, not the Docker Hub community tier (spec 2.1, DSD-IMG-004).
+			rule = "DSD-IMG-004"
+			sev = diag.SeverityLow
+		default:
+			// The community tier is development-only whatever the tag; the
+			// public-path pull risk of DSD-IMG-002 does not apply (spec 2.1).
+			rule = "DSD-IMG-003"
+			sev = diag.SeverityMedium
+		}
+	case imageref.Bitnami:
+		switch {
+		case r.Registry != "" && r.Registry != "docker.io":
 			rule = "DSD-IMG-004"
 			sev = diag.SeverityLow
 		case r.Tag == "" && !r.Templated && r.Digest == "" || strings.EqualFold(r.Tag, "latest"):
@@ -206,6 +222,9 @@ func (s *walkState) scanConfigAt(n *yaml.Node, depth int) {
 	if n == nil || depth > maxYAMLDepth {
 		return
 	}
+	if isSecretMapping(n) {
+		return
+	}
 	if n.Kind == yaml.MappingNode {
 		if v := nodeAt(n, "global", "security", "allowInsecureImages"); v != nil && v.Tag == "!!bool" {
 			var enabled bool
@@ -221,6 +240,7 @@ func (s *walkState) scanConfigAt(n *yaml.Node, depth int) {
 
 // Dockerfile detects image references in FROM and external COPY instructions.
 func Dockerfile(path string, data []byte) diag.Report {
+	data = stripBOM(data)
 	var out diag.Report
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), maxDockerfileLine)
@@ -229,8 +249,17 @@ func Dockerfile(path string, data []byte) diag.Report {
 	args, stages := map[string]string{}, map[string]bool{}
 	seenFrom := false
 	logical := ""
+	var heredocs []heredoc
 	for scanner.Scan() {
 		line++
+		if len(heredocs) > 0 {
+			// Heredoc bodies are shell or file content, never Dockerfile
+			// instructions: skip until the matching terminator (spec section 9).
+			if heredocs[0].terminates(scanner.Text()) {
+				heredocs = heredocs[1:]
+			}
+			continue
+		}
 		part := strings.TrimSpace(scanner.Text())
 		if logical == "" {
 			start = line
@@ -241,8 +270,10 @@ func Dockerfile(path string, data []byte) diag.Report {
 		if continued {
 			continue
 		}
-		f := strings.Fields(strings.TrimSpace(logical))
+		instruction := strings.TrimSpace(logical)
 		logical = ""
+		heredocs = heredocDelimiters(instruction)
+		f := strings.Fields(instruction)
 		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
 			continue
 		}
@@ -287,12 +318,56 @@ func Dockerfile(path string, data []byte) diag.Report {
 	return out
 }
 
+// expandDockerArgs substitutes ${NAME} and $NAME variable tokens from the ARG
+// defaults. Tokens are parsed, so a name is never rewritten as a substring of a
+// longer one and the result does not depend on map iteration order (spec 10).
 func expandDockerArgs(v string, args map[string]string) string {
-	for name, value := range args {
-		v = strings.ReplaceAll(v, "${"+name+"}", value)
-		v = strings.ReplaceAll(v, "$"+name, value)
+	if len(args) == 0 || !strings.Contains(v, "$") {
+		return v
 	}
-	return v
+	var b strings.Builder
+	for i := 0; i < len(v); {
+		if v[i] != '$' {
+			b.WriteByte(v[i])
+			i++
+			continue
+		}
+		if j := i + 1; j < len(v) && v[j] == '{' {
+			if end := strings.IndexByte(v[j+1:], '}'); end >= 0 {
+				name := v[j+1 : j+1+end]
+				if value, ok := args[name]; ok {
+					b.WriteString(value)
+				} else {
+					b.WriteString(v[i : j+1+end+1])
+				}
+				i = j + 1 + end + 1
+				continue
+			}
+			b.WriteByte(v[i])
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(v) && isArgNameByte(v[j]) {
+			j++
+		}
+		if j == i+1 {
+			b.WriteByte(v[i])
+			i++
+			continue
+		}
+		if value, ok := args[v[i+1:j]]; ok {
+			b.WriteString(value)
+		} else {
+			b.WriteString(v[i:j])
+		}
+		i = j
+	}
+	return b.String()
+}
+
+func isArgNameByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 func loc(path string, line, column int) diag.Location {
 	return diag.Location{Path: path, Line: line, Column: column}
@@ -418,6 +493,9 @@ func (s *walkState) scanFallbackAt(n *yaml.Node, key string, depth int) {
 	if n == nil || depth > maxYAMLDepth {
 		return
 	}
+	if isSecretMapping(n) {
+		return
+	}
 	switch n.Kind {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
@@ -495,4 +573,70 @@ func isReferenceChar(c byte) bool {
 		return true
 	}
 	return false
+}
+
+// stripBOM removes a UTF-8 byte order mark at the start of a text file, so a
+// BOM cannot hide the first instruction or mapping key (spec section 9).
+func stripBOM(data []byte) []byte {
+	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
+		return data[3:]
+	}
+	return data
+}
+
+// isSecretMapping reports whether n is a mapping that declares kind: Secret.
+// Nothing under a Secret is scanned or printed, at any depth (spec section 6).
+func isSecretMapping(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.MappingNode && strings.EqualFold(valueAt(n, "kind"), "Secret")
+}
+
+// heredoc is one pending Dockerfile heredoc body.
+type heredoc struct {
+	name string
+	dash bool
+}
+
+// terminates reports whether line closes the heredoc body. A <<- heredoc
+// accepts a terminator indented with tabs.
+func (h heredoc) terminates(line string) bool {
+	line = strings.TrimRight(line, "\r")
+	if h.dash {
+		line = strings.TrimLeft(line, "\t")
+	}
+	return line == h.name
+}
+
+// heredocDelimiters returns the heredoc bodies a shell instruction opens, in
+// order: <<EOF, <<-EOF, <<'EOF' and <<"EOF" are all recognized (spec 9).
+func heredocDelimiters(instruction string) []heredoc {
+	var out []heredoc
+	for i := 0; i+1 < len(instruction); i++ {
+		if instruction[i] != '<' || instruction[i+1] != '<' {
+			continue
+		}
+		j := i + 2
+		dash := false
+		if j < len(instruction) && instruction[j] == '-' {
+			dash = true
+			j++
+		}
+		quote := byte(0)
+		if j < len(instruction) && (instruction[j] == '\'' || instruction[j] == '"') {
+			quote = instruction[j]
+			j++
+		}
+		k := j
+		for k < len(instruction) && isArgNameByte(instruction[k]) {
+			k++
+		}
+		if k == j {
+			continue
+		}
+		if quote != 0 && (k >= len(instruction) || instruction[k] != quote) {
+			continue
+		}
+		out = append(out, heredoc{name: instruction[j:k], dash: dash})
+		i = k
+	}
+	return out
 }

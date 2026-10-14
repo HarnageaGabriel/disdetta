@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"io"
-	"strconv"
+	"strings"
 	"text/tabwriter"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Table writes the v1 compact deterministic table and summary.
@@ -71,4 +73,37 @@ func location(v diag.Location) string {
 	}
 	return fmt.Sprintf("%s:%d:%d", v.Path, v.Line, v.Column)
 }
-func safeCell(v string) string { q := strconv.Quote(v); return q[1 : len(q)-1] }
+
+// safeCell escapes a table cell so no raw control character or Unicode format
+// character (category Cf) can forge a row, and an invalid UTF-8 byte is
+// escaped rather than replaced (spec section 6).
+func safeCell(v string) string {
+	var b strings.Builder
+	for i := 0; i < len(v); {
+		r, size := utf8.DecodeRuneInString(v[i:])
+		if r == utf8.RuneError && size == 1 {
+			fmt.Fprintf(&b, `\x%02x`, v[i])
+			i++
+			continue
+		}
+		i += size
+		switch {
+		case r == '"':
+			b.WriteString(`\"`)
+		case r == '\\':
+			b.WriteString(`\\`)
+		case !unicode.IsPrint(r) || unicode.In(r, unicode.Cf):
+			switch {
+			case r > 0xFFFF:
+				fmt.Fprintf(&b, `\U%08x`, r)
+			case r > 0xFF:
+				fmt.Fprintf(&b, `\u%04x`, r)
+			default:
+				fmt.Fprintf(&b, `\x%02x`, r)
+			}
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

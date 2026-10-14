@@ -72,14 +72,23 @@ func TestSkippedAndMalformed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "bad.yaml"), []byte("image: [\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "large.yaml"), make([]byte, 5*1024*1024+1), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "large.yaml"), make([]byte, repo.MaxFileSize+1), 0600); err != nil {
 		t.Fatal(err)
 	}
 	r, err := repo.Scan(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// review 02 F17: the oversize file is an error (DSD-SCN-008) and still a
+	// skip; the malformed file stays a DSD-SCN-001 error.
 	if len(r.Diagnostics) != 2 || r.Summary.FilesSkipped != 1 || r.Summary.Complete {
 		t.Fatalf("source docs/spec/v0.1.md sections 3,8: %#v", r)
+	}
+	codes := map[string]bool{}
+	for _, d := range r.Diagnostics {
+		codes[d.Code] = true
+	}
+	if !codes["DSD-SCN-001"] || !codes["DSD-SCN-008"] {
+		t.Fatalf("review 02 F17: %#v", r.Diagnostics)
 	}
 }
