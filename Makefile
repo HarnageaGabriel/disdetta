@@ -1,7 +1,9 @@
 BINARY_EXT := $(if $(filter Windows_NT,$(OS)),.exe,)
+VERSION_PKG := github.com/HarnageaGabriel/disdetta/internal/version
+LDFLAGS := -s -w -X $(VERSION_PKG).Version=$${VERSION:-dev} -X $(VERSION_PKG).Commit=$${COMMIT:-unknown} -X $(VERSION_PKG).Date=$${DATE:-unknown}
 .PHONY: build test test-race lint vuln cover tidy fmt
 build:
-	go build -trimpath -o bin/disdetta$(BINARY_EXT) ./cmd/disdetta
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/disdetta$(BINARY_EXT) ./cmd/disdetta
 test:
 	go test ./...
 test-race:

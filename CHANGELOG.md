@@ -1,7 +1,8 @@
 # Changelog
 
-All notable changes are documented here. Format: Keep a Changelog; versioning: SemVer.
+## [0.1.0] - Unreleased
 
-## [Unreleased]
-
-- Project scaffolding and study phase.
+- Repository scan: rules, sources, and ignore-file support.
+- Cluster scan: tiered analysis with opt-in Helm Secret reads.
+- PostgreSQL migration plan: partial support.
+- Corpus of repository and cluster fixtures for coverage.
