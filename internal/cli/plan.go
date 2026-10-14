@@ -3,15 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/HarnageaGabriel/disdetta/internal/plan"
 	"github.com/HarnageaGabriel/disdetta/internal/scan/cluster"
+	"github.com/HarnageaGabriel/disdetta/internal/scan/repo"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +39,7 @@ func newPlanCmd(streams IO) *cobra.Command {
 		if fromCluster {
 			in, err = clusterPlanInput(cmd.Context(), release, cluster.Options{Context: contextName, Kubeconfig: kubeconfig, Namespaces: namespaces, ReadHelmSecrets: true, Timeout: timeout})
 		} else {
-			in, err = repoPlanInput(fromRepo, release, values)
+			in, err = repoPlanInputContext(cmd.Context(), fromRepo, release, values)
 		}
 		if err != nil {
 			return &exitError{ExitError, err}
@@ -75,8 +74,10 @@ func newPlanCmd(streams IO) *cobra.Command {
 				return &exitError{ExitError, fmt.Errorf("write plan: %w", err)}
 			}
 		}
-		if len(result.Unmapped) > 0 {
-			return &exitError{code: ExitPlanIncomplete}
+		for _, item := range result.Unmapped {
+			if item.Kind != "handled" {
+				return &exitError{code: ExitPlanIncomplete}
+			}
 		}
 		return nil
 	}}
@@ -96,37 +97,16 @@ func newPlanCmd(streams IO) *cobra.Command {
 }
 
 func repoPlanInput(root, release string, valuePaths []string) (plan.Input, error) {
-	files := map[string][]byte{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if path != root && (d.Name() == ".git" || d.Name() == "vendor" || d.Name() == "node_modules") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-		b, e := os.ReadFile(path)
-		if e != nil {
-			return e
-		}
-		files[path] = b
-		return nil
-	})
+	return repoPlanInputContext(context.Background(), root, release, valuePaths)
+}
+func repoPlanInputContext(ctx context.Context, root, release string, valuePaths []string) (plan.Input, error) {
+	files, err := repo.ReadYAMLFiles(ctx, root)
 	if err != nil {
 		return plan.Input{}, fmt.Errorf("read repository: %w", err)
 	}
 	var extra [][]byte
 	for _, p := range valuePaths {
-		b, e := os.ReadFile(p)
+		b, e := repo.ReadFile(p)
 		if e != nil {
 			return plan.Input{}, fmt.Errorf("read values %s: %w", p, e)
 		}

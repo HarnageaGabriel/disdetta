@@ -7,26 +7,25 @@ spec:
     instances: 1
 ---
 # unmapped
-coverage: mapped 1 of 3 user-set keys
+coverage: mapped 1 of 3 user-set keys; derived 0 parser items
 unmapped:
     - path: auth.existingSecret
       kind: manual
       note: Create a CNPG basic-auth Secret; the Bitnami Secret layout differs.
     - path: auth.password
       kind: manual
-      note: Create a CNPG basic-auth Secret; password values are never copied.
+      note: credentials are never copied; create a basic-auth Secret
 ---
 # checklist.md
 # Migration checklist: pg
 
-- [ ] Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped). ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Stop writes on the source before the final import; later changes are not copied. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Size PGDATA for the staged dump, data, and indexes. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Ensure the source is reachable and the import user can run pg_dump and read roles. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2. ([source](https://cloudnative-pg.io/docs/devel/postgresql_conf))
-- [ ] On PostgreSQL 14+, review any md5 pg_hba rules before the default scram-sha-256 catch-all. ([source](https://cloudnative-pg.io/docs/devel/postgresql_conf))
-- [ ] Resolve auth.existingSecret: Create a CNPG basic-auth Secret; the Bitnami Secret layout differs. ([source](https://cloudnative-pg.io/docs/devel/cloudnative-pg.v1))
-- [ ] Resolve auth.password: Create a CNPG basic-auth Secret; password values are never copied. ([source](https://cloudnative-pg.io/docs/devel/cloudnative-pg.v1))
+- [ ] Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped). ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Stop writes on the source before the final import; later changes are not copied. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Size PGDATA for the staged dump, data, and indexes. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Ensure the source is reachable and the import user can run pg_dump and read roles. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2. ([source](https://cloudnative-pg.io/docs/1.30/postgresql_conf))
+- [ ] Resolve auth.existingSecret: Create a CNPG basic-auth Secret; the Bitnami Secret layout differs. ([source](https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1))
+- [ ] Resolve auth.password: credentials are never copied; create a basic-auth Secret ([source](https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1))
 
-# mapped 1 of 3 user-set keys
+# mapped 1 of 3 user-set keys; derived 0 parser items

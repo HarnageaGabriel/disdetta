@@ -37,16 +37,16 @@
     {
       "path": "auth.password",
       "kind": "manual",
-      "note": "Create a CNPG basic-auth Secret; password values are never copied."
+      "note": "credentials are never copied; create a basic-auth Secret"
     },
     {
       "path": "postgresqlSharedPreloadLibraries.pgaudit",
-      "kind": "unmapped",
-      "note": "loaded automatically by CloudNativePG only when pgaudit.* parameters are set; set one to keep the library loaded"
+      "kind": "handled",
+      "note": "loaded automatically by CloudNativePG"
     },
     {
       "path": "primary.configuration:line5",
-      "kind": "unmapped",
+      "kind": "manual",
       "note": "include directives require manual migration"
     },
     {
@@ -63,43 +63,48 @@
   "checklist": [
     {
       "text": "Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped).",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Stop writes on the source before the final import; later changes are not copied.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Size PGDATA for the staged dump, data, and indexes.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Ensure the source is reachable and the import user can run pg_dump and read roles.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2.",
-      "source": "https://cloudnative-pg.io/docs/devel/postgresql_conf"
+      "source": "https://cloudnative-pg.io/docs/1.30/postgresql_conf"
     },
     {
-      "text": "On PostgreSQL 14+, review any md5 pg_hba rules before the default scram-sha-256 catch-all.",
-      "source": "https://cloudnative-pg.io/docs/devel/postgresql_conf"
+      "text": "On PostgreSQL 14+, review md5 pg_hba rules before the default scram-sha-256 catch-all.",
+      "source": "https://cloudnative-pg.io/docs/1.30/postgresql_conf"
     },
     {
       "text": "pgaudit requires a standard CloudNativePG operand image.",
-      "source": "https://github.com/cloudnative-pg/postgres-containers"
+      "source": "https://cloudnative-pg.io/docs/1.30/postgresql_conf"
     },
     {
-      "text": "Resolve auth.password: Create a CNPG basic-auth Secret; password values are never copied.",
-      "source": "https://cloudnative-pg.io/docs/devel/cloudnative-pg.v1"
+      "text": "Resolve auth.password: credentials are never copied; create a basic-auth Secret",
+      "source": "https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1"
+    },
+    {
+      "text": "Resolve primary.configuration:line5: include directives require manual migration",
+      "source": "https://cloudnative-pg.io/docs/1.30/postgresql_conf"
     }
   ],
   "coverage": {
     "mapped": 6,
-    "total": 11
+    "total": 7,
+    "derived": 4
   }
 }

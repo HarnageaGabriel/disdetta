@@ -39,6 +39,10 @@ func YAML(path string, data []byte) diag.Report {
 			continue
 		}
 		root := doc.Content[0]
+		if err := GuardYAML(root); err != nil {
+			out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, root.Line, root.Column, err.Error()))
+			continue
+		}
 		if strings.EqualFold(findString(root, []string{"kind"}), "Secret") {
 			continue
 		}

@@ -29,35 +29,32 @@
   "checklist": [
     {
       "text": "Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped).",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Stop writes on the source before the final import; later changes are not copied.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Size PGDATA for the staged dump, data, and indexes.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "Ensure the source is reachable and the import user can run pg_dump and read roles.",
-      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
     },
     {
       "text": "CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2.",
-      "source": "https://cloudnative-pg.io/docs/devel/postgresql_conf"
-    },
-    {
-      "text": "On PostgreSQL 14+, review any md5 pg_hba rules before the default scram-sha-256 catch-all.",
-      "source": "https://cloudnative-pg.io/docs/devel/postgresql_conf"
+      "source": "https://cloudnative-pg.io/docs/1.30/postgresql_conf"
     }
   ],
   "coverage": {
     "mapped": 5,
-    "total": 5
+    "total": 5,
+    "derived": 0
   }
 }

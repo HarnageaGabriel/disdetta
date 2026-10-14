@@ -4,26 +4,36 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
+	"github.com/HarnageaGabriel/disdetta/internal/detect"
 	"gopkg.in/yaml.v3"
 )
 
 // FindRepoRelease inspects Kubernetes YAML documents and returns one Flux
 // HelmRelease or Argo Application whose effective release name matches name.
 func FindRepoRelease(name string, files map[string][]byte, valueFiles [][]byte) (Input, error) {
+	extra := make([]map[string]any, 0, len(valueFiles))
+	for i, data := range valueFiles {
+		vals, err := decodeOneMap(data)
+		if err != nil {
+			return Input{}, fmt.Errorf("parse --values %d: invalid or unsafe YAML", i+1)
+		}
+		extra = append(extra, vals)
+	}
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
 	var matches []Input
-	for file, data := range files {
-		dec := yaml.NewDecoder(bytes.NewReader(data))
-		for {
-			var doc map[string]any
-			err := dec.Decode(&doc)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return Input{}, fmt.Errorf("parse %s: %w", file, err)
-			}
+	for _, file := range paths {
+		docs, err := decodeMaps(files[file])
+		if err != nil {
+			return Input{}, fmt.Errorf("parse %s: invalid or unsafe YAML", file)
+		}
+		for _, doc := range docs {
 			if len(doc) == 0 {
 				continue
 			}
@@ -43,8 +53,29 @@ func FindRepoRelease(name string, files map[string][]byte, valueFiles [][]byte) 
 				chartSpec, _ := nestedMap(spec, "chart", "spec")
 				chart, _ := chartSpec["chart"].(string)
 				version, _ := chartSpec["version"].(string)
-				vals, _ := spec["values"].(map[string]any)
-				matches = append(matches, Input{name, chart, version, clone(vals)})
+				inline, _ := spec["values"].(map[string]any)
+				rawValuesFrom, hasValuesFrom := spec["valuesFrom"]
+				if hasValuesFrom {
+					valuesFrom, ok := rawValuesFrom.([]any)
+					if !ok {
+						return Input{}, fmt.Errorf("valuesFrom must be a list")
+					}
+					if len(extra) == 0 {
+						return Input{}, fmt.Errorf("valuesFrom is not resolved; pass the referenced values with --values")
+					}
+					for _, raw := range valuesFrom {
+						entry, _ := raw.(map[string]any)
+						if target, _ := entry["targetPath"].(string); target != "" {
+							return Input{}, fmt.Errorf("valuesFrom targetPath is not reproduced by --values")
+						}
+					}
+				}
+				vals := map[string]any{}
+				for _, layer := range extra {
+					merge(vals, layer)
+				}
+				merge(vals, inline) // Flux applies spec.values after valuesFrom.
+				matches = append(matches, Input{name, chart, version, vals})
 			case "Application":
 				source, _ := spec["source"].(map[string]any)
 				helm, _ := source["helm"].(map[string]any)
@@ -59,12 +90,17 @@ func FindRepoRelease(name string, files map[string][]byte, valueFiles [][]byte) 
 				version, _ := source["targetRevision"].(string)
 				vals := map[string]any{}
 				if raw, ok := helm["values"].(string); ok && strings.TrimSpace(raw) != "" {
-					if err := yaml.Unmarshal([]byte(raw), &vals); err != nil {
-						return Input{}, fmt.Errorf("parse Argo helm.values in %s: %w", file, err)
+					parsed, err := decodeOneMap([]byte(raw))
+					if err != nil {
+						return Input{}, fmt.Errorf("parse Argo helm.values in %s: invalid or unsafe YAML", file)
 					}
+					merge(vals, parsed)
 				}
 				if obj, ok := helm["valuesObject"].(map[string]any); ok {
 					merge(vals, obj)
+				}
+				for _, layer := range extra {
+					merge(vals, layer)
 				}
 				matches = append(matches, Input{name, chart, version, vals})
 			}
@@ -80,29 +116,65 @@ func FindRepoRelease(name string, files map[string][]byte, valueFiles [][]byte) 
 	if in.Chart == "" || in.ChartVersion == "" {
 		return Input{}, fmt.Errorf("release %q has no chart name or exact version", name)
 	}
-	for i, data := range valueFiles {
-		var vals map[string]any
-		if err := yaml.Unmarshal(data, &vals); err != nil {
-			return Input{}, fmt.Errorf("parse --values %d: %w", i+1, err)
-		}
-		merge(in.Values, vals)
-	}
 	return in, nil
+}
+
+func decodeMaps(data []byte) ([]map[string]any, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var out []map[string]any
+	for {
+		var doc yaml.Node
+		if err := dec.Decode(&doc); err != nil {
+			if err == io.EOF {
+				return out, nil
+			}
+			return nil, err
+		}
+		if len(doc.Content) == 0 {
+			continue
+		}
+		if err := detect.GuardYAML(doc.Content[0]); err != nil {
+			return nil, err
+		}
+		var value map[string]any
+		if err := doc.Content[0].Decode(&value); err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+}
+
+func decodeOneMap(data []byte) (map[string]any, error) {
+	docs, err := decodeMaps(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(docs) == 0 {
+		return map[string]any{}, nil
+	}
+	return docs[0], nil
 }
 
 func MergeValues(dst map[string]any, src map[string]any) { merge(dst, src) }
 func merge(dst, src map[string]any) {
 	for k, v := range src {
+		if v == nil {
+			delete(dst, k)
+			continue
+		}
 		if sm, ok := v.(map[string]any); ok {
 			if dm, ok := dst[k].(map[string]any); ok {
 				merge(dm, sm)
 				continue
 			}
+			child := map[string]any{}
+			merge(child, sm)
+			dst[k] = child
+			continue
 		}
 		dst[k] = v
 	}
 }
-func clone(src map[string]any) map[string]any { out := map[string]any{}; merge(out, src); return out }
 func nestedMap(m map[string]any, keys ...string) (map[string]any, bool) {
 	var cur any = m
 	for _, k := range keys {

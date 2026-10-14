@@ -32,6 +32,7 @@ type Mapping struct {
 	From      string `yaml:"from" json:"from"`
 	To        string `yaml:"to,omitempty" json:"to,omitempty"`
 	Kind      string `yaml:"kind" json:"kind"`
+	Accepts   string `yaml:"accepts,omitempty" json:"accepts,omitempty"`
 	Transform string `yaml:"transform,omitempty" json:"transform,omitempty"`
 	Note      string `yaml:"note,omitempty" json:"note,omitempty"`
 	Source    Source `yaml:"source" json:"source"`
@@ -59,15 +60,39 @@ func ParseCatalog(data []byte) (Catalog, error) {
 	if c.SchemaVersion != "1" || c.Chart == "" || len(c.Routes) == 0 {
 		return c, fmt.Errorf("invalid route catalog")
 	}
+	if c.Maturity != "verified" && c.Maturity != "partial" && c.Maturity != "route-only" {
+		return c, fmt.Errorf("invalid route catalog maturity")
+	}
+	for _, route := range c.Routes {
+		if route.ID == "" || route.Target.Name == "" || route.Target.Kind == "" || route.Target.APIVersion == "" || route.Target.Version == "" || !strings.HasPrefix(route.Source.URL, "https://") {
+			return c, fmt.Errorf("invalid catalog route")
+		}
+	}
 	for _, m := range c.Mappings {
 		if !strings.HasPrefix(m.Source.URL, "https://") || m.Source.Verified == "" {
 			return c, fmt.Errorf("mapping %q has unverified source", m.From)
 		}
-		if m.Kind == "transform" && !RegisteredTransform(m.Transform) {
-			return c, fmt.Errorf("mapping %q names unknown transform %q", m.From, m.Transform)
+		switch m.Kind {
+		case "rename", "constant", "transform", "manual", "unmapped", "handled":
+		default:
+			return c, fmt.Errorf("mapping %q has invalid kind", m.From)
 		}
-		if (m.Kind == "manual" || m.Kind == "unmapped") && m.Note == "" {
+		if m.Kind == "transform" && (m.To == "" || !RegisteredTransform(m.Transform)) {
+			return c, fmt.Errorf("mapping %q names an invalid transform", m.From)
+		}
+		if (m.Kind == "rename" || m.Kind == "constant") && (m.To == "" || m.Accepts == "") {
+			return c, fmt.Errorf("mapping %q requires a target and accepted value shape", m.From)
+		}
+		if m.Accepts != "" && !validShapeName(m.Accepts) {
+			return c, fmt.Errorf("mapping %q has unknown accepted value shape", m.From)
+		}
+		if (m.Kind == "manual" || m.Kind == "unmapped" || m.Kind == "handled") && m.Note == "" {
 			return c, fmt.Errorf("mapping %q requires a note", m.From)
+		}
+	}
+	for _, item := range c.Checklist {
+		if item.ID == "" || item.Text == "" || !strings.HasPrefix(item.Source.URL, "https://") {
+			return c, fmt.Errorf("invalid catalog checklist item")
 		}
 	}
 	return c, nil
@@ -103,16 +128,16 @@ func SelectCatalog(catalogs []Catalog, chart, version, routeID string) (Catalog,
 			continue
 		}
 		if !applies(c.AppliesTo, version) {
-			return Catalog{}, Route{}, fmt.Errorf("chart %s version %s is outside catalog range %s", chart, version, c.AppliesTo)
+			return Catalog{}, Route{}, fmt.Errorf("chart version is outside catalog range %s", c.AppliesTo)
 		}
 		for _, r := range c.Routes {
 			if routeID == "" && r.Recommended || r.ID == routeID {
 				return c, r, nil
 			}
 		}
-		return Catalog{}, Route{}, fmt.Errorf("route %q not found for chart %s", routeID, chart)
+		return Catalog{}, Route{}, fmt.Errorf("requested route not found for chart")
 	}
-	return Catalog{}, Route{}, fmt.Errorf("no catalog route for chart %s", chart)
+	return Catalog{}, Route{}, fmt.Errorf("no catalog route for chart")
 }
 
 func applies(expr, version string) bool {

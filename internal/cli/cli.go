@@ -199,10 +199,10 @@ func Execute(ctx context.Context, args []string, streams IO) int {
 	var coded *exitError
 	if errors.As(err, &coded) {
 		if coded.err != nil {
-			_, _ = fmt.Fprintf(streams.Err, "disdetta: %v\n", coded.err)
+			_, _ = fmt.Fprintf(streams.Err, "disdetta: %s\n", report.SafeText(coded.err.Error()))
 		}
 		return coded.code
 	}
-	_, _ = fmt.Fprintf(streams.Err, "disdetta: %v\n", err)
+	_, _ = fmt.Fprintf(streams.Err, "disdetta: %s\n", report.SafeText(err.Error()))
 	return ExitError
 }

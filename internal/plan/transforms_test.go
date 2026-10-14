@@ -15,9 +15,9 @@ func TestInstancesFromArchitecture(t *testing.T) {
 	}{
 		{"standalone", "standalone", map[string]any{}, 1, false},
 		{"replication", "replication", map[string]any{"readReplicas": map[string]any{"replicaCount": 2}}, 3, false},
-		{"missing replicas", "replication", map[string]any{}, nil, true},
-		{"invalid architecture", "other", map[string]any{}, nil, true},
-		{"negative replicas", "replication", map[string]any{"readReplicas": map[string]any{"replicaCount": -1}}, nil, true},
+		{"missing replicas", "replication", map[string]any{}, 2, false},
+		{"invalid architecture", "other", map[string]any{}, nil, false},
+		{"negative replicas", "replication", map[string]any{"readReplicas": map[string]any{"replicaCount": -1}}, nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -35,15 +35,15 @@ func TestParsePostgresqlConf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"pgaudit.log": "write, ddl", "auto_explain.log_min_duration": "1s#kept"}
+	want := map[string]any{"pgaudit.log": "write, ddl", "auto_explain.log_min_duration": "1s#kept", "invalid": "line"}
 	if !reflect.DeepEqual(got.Value, want) {
 		t.Fatalf("parameters=%#v", got.Value)
 	}
-	if len(got.Dropped) != 4 || got.Dropped[0].Path != "primary.configuration:listen_addresses" || got.Dropped[1].Note != "fixed parameter managed by CloudNativePG; cannot be set" {
+	if len(got.Dropped) != 3 || got.Dropped[0].Path != "primary.configuration:listen_addresses" || got.Dropped[1].Note != "fixed parameter managed by CloudNativePG; cannot be set" {
 		t.Fatalf("dropped=%#v", got.Dropped)
 	}
-	if _, err := parsePostgresqlConf("primary.configuration", 42, nil); err == nil {
-		t.Fatal("non-string accepted")
+	if invalid, err := parsePostgresqlConf("primary.configuration", 42, nil); err != nil || len(invalid.Dropped) != 1 {
+		t.Fatalf("non-string result=%#v err=%v", invalid, err)
 	}
 }
 
@@ -52,8 +52,8 @@ func TestSplitLines(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got.Value, []string{"host all all 0.0.0.0/0 md5"}) {
 		t.Fatalf("got=%#v err=%v", got, err)
 	}
-	if _, err := splitLines("hba", 1, nil); err == nil {
-		t.Fatal("non-string accepted")
+	if invalid, err := splitLines("hba", 1, nil); err != nil || len(invalid.Dropped) != 1 {
+		t.Fatalf("non-string result=%#v err=%v", invalid, err)
 	}
 }
 
@@ -62,10 +62,10 @@ func TestSplitComma(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Value, []string{"vector", "timescaledb"}) || len(got.Dropped) != 2 || len(got.Checklist) != 1 {
+	if !reflect.DeepEqual(got.Value, []string{"vector", "timescaledb"}) || len(got.Dropped) != 2 || len(got.Checklist) != 0 {
 		t.Fatalf("got=%#v", got)
 	}
-	if _, err := splitComma("libs", true, nil); err == nil {
-		t.Fatal("non-string accepted")
+	if invalid, err := splitComma("libs", true, nil); err != nil || len(invalid.Dropped) != 1 {
+		t.Fatalf("non-string result=%#v err=%v", invalid, err)
 	}
 }

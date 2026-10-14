@@ -134,3 +134,53 @@ func TestSecretsNeverRendered(t *testing.T) {
 		}
 	}
 }
+
+// review 04 #14: schemas reject unsafe catalog and plan shapes while accepting
+// the new handled classification.
+func TestReview04SchemasAreTight(t *testing.T) {
+	root := filepath.Join("..", "..")
+	compiler := jsonschema.NewCompiler()
+	catalogSchema, err := compiler.Compile(filepath.Join(root, "schemas", "catalog-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogs, err := EmbeddedCatalogs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawCatalog, _ := json.Marshal(catalogs[0])
+	var catalogDoc map[string]any
+	if err := json.Unmarshal(rawCatalog, &catalogDoc); err != nil {
+		t.Fatal(err)
+	}
+	mappings := catalogDoc["mappings"].([]any)
+	delete(mappings[1].(map[string]any), "to")
+	badCatalog, _ := json.Marshal(catalogDoc)
+	doc, _ := jsonschema.UnmarshalJSON(bytes.NewReader(badCatalog))
+	if err := catalogSchema.Validate(doc); err == nil {
+		t.Fatal("rename mapping without to accepted")
+	}
+
+	planSchema, err := compiler.Compile(filepath.Join(root, "schemas", "plan-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := map[string]any{
+		"schemaVersion": "1", "release": "pg", "chart": "postgresql", "chartVersion": "16.7.4",
+		"route": "cloudnative-pg", "maturity": "partial",
+		"target":    map[string]any{"apiVersion": "v1", "kind": "Cluster", "metadata": map[string]any{"name": "pg"}},
+		"unmapped":  []any{map[string]any{"path": "library", "kind": "handled", "note": "handled"}},
+		"checklist": []any{}, "coverage": map[string]any{"mapped": 1, "total": 1, "derived": 1},
+	}
+	validJSON, _ := json.Marshal(valid)
+	doc, _ = jsonschema.UnmarshalJSON(bytes.NewReader(validJSON))
+	if err := planSchema.Validate(doc); err != nil {
+		t.Fatalf("handled plan rejected: %v", err)
+	}
+	valid["maturity"] = "guess"
+	badPlan, _ := json.Marshal(valid)
+	doc, _ = jsonschema.UnmarshalJSON(bytes.NewReader(badPlan))
+	if err := planSchema.Validate(doc); err == nil {
+		t.Fatal("arbitrary maturity accepted")
+	}
+}

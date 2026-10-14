@@ -14,18 +14,17 @@ spec:
         storageClass: fast
 ---
 # unmapped
-coverage: mapped 5 of 5 user-set keys
+coverage: mapped 5 of 5 user-set keys; derived 0 parser items
 unmapped: []
 ---
 # checklist.md
 # Migration checklist: pg
 
-- [ ] Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped). ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Stop writes on the source before the final import; later changes are not copied. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Size PGDATA for the staged dump, data, and indexes. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] Ensure the source is reachable and the import user can run pg_dump and read roles. ([source](https://cloudnative-pg.io/docs/devel/database_import))
-- [ ] CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2. ([source](https://cloudnative-pg.io/docs/devel/postgresql_conf))
-- [ ] On PostgreSQL 14+, review any md5 pg_hba rules before the default scram-sha-256 catch-all. ([source](https://cloudnative-pg.io/docs/devel/postgresql_conf))
+- [ ] Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped). ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Stop writes on the source before the final import; later changes are not copied. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Size PGDATA for the staged dump, data, and indexes. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] Ensure the source is reachable and the import user can run pg_dump and read roles. ([source](https://cloudnative-pg.io/docs/1.30/database_import))
+- [ ] CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2. ([source](https://cloudnative-pg.io/docs/1.30/postgresql_conf))
 
-# mapped 5 of 5 user-set keys
+# mapped 5 of 5 user-set keys; derived 0 parser items
