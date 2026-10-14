@@ -32,6 +32,8 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 				s.out.Findings[i].Impact = catalog.Impact(chart)
 			}
 		}
+	case kind == "helmchartinflationgenerator":
+		s.scanHelmChartGenerator(root)
 	case kind == "application":
 		s.scanArgo(nodeAt(root, "spec"))
 	case kind == "applicationset":
@@ -236,7 +238,17 @@ func (s *walkState) scanKustomize(root *yaml.Node) {
 			s.addImage(name, n.Line, n.Column, false)
 		}
 	}
+	for _, chart := range sequenceAt(root, "helmCharts") {
+		s.addChartAt(nodeAt(chart, "repo"), valueAt(chart, "name"))
+		s.scanImages(nodeAt(chart, "valuesInline"), true)
+	}
 }
+
+func (s *walkState) scanHelmChartGenerator(root *yaml.Node) {
+	s.addChartAt(nodeAt(root, "repo"), valueAt(root, "name"))
+	s.scanImages(nodeAt(root, "valuesInline"), true)
+}
+
 func (s *walkState) scanCompose(root *yaml.Node) {
 	for _, service := range mapValues(nodeAt(root, "services")) {
 		s.addNodeImage(nodeAt(service, "image"), false)

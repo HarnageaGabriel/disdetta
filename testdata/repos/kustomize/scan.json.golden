@@ -5,11 +5,11 @@
     "version": "dev"
   },
   "summary": {
-    "filesScanned": 1,
+    "filesScanned": 2,
     "filesSkipped": 0,
     "findings": {
-      "high": 1,
-      "medium": 0,
+      "high": 3,
+      "medium": 2,
       "low": 0
     },
     "diagnostics": 0,
@@ -18,6 +18,24 @@
     "complete": true
   },
   "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helm-chart-inflation-generator.yaml",
+        "line": 9,
+        "column": 17
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql:16.4.0",
+      "original": "bitnamilegacy/postgresql:16.4.0",
+      "attributes": [
+        "embedded-values"
+      ],
+      "fingerprint": "ec98d774e31b8e94"
+    },
     {
       "ruleId": "DSD-IMG-002",
       "severity": "high",
@@ -35,6 +53,60 @@
         "pull-risk"
       ],
       "fingerprint": "321599b6a24d57fc"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "kustomization.yaml",
+        "line": 12,
+        "column": 21
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql:16.4.0",
+      "original": "bitnamilegacy/postgresql:16.4.0",
+      "attributes": [
+        "embedded-values"
+      ],
+      "fingerprint": "1ff1092592e02c36"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helm-chart-inflation-generator.yaml",
+        "line": 5,
+        "column": 7
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "d4ad529b12efa251"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "kustomization.yaml",
+        "line": 8,
+        "column": 11
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "957b703f2f963b85"
     }
   ],
   "diagnostics": []

@@ -1,3 +1,7 @@
-LOCATION                 RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
-kustomization.yaml:3:14  DSD-IMG-002  high      confirmed   high    docker.io/bitnami/redis:7
-scanned 1 files, skipped 0, findings 1 (high 1, medium 0, low 0), diagnostics 0, unresolved 0, ignored 0
+LOCATION                                  RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
+helm-chart-inflation-generator.yaml:9:17  DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16.4.0
+kustomization.yaml:3:14                   DSD-IMG-002  high      confirmed   high    docker.io/bitnami/redis:7
+kustomization.yaml:12:21                  DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16.4.0
+helm-chart-inflation-generator.yaml:5:7   DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
+kustomization.yaml:8:11                   DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
+scanned 2 files, skipped 0, findings 5 (high 3, medium 2, low 0), diagnostics 0, unresolved 0, ignored 0
