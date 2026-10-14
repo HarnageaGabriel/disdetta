@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 2,
+      "medium": 0,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "os-shell",
+      "location": {
+        "path": "values.yaml",
+        "line": 10,
+        "column": 17
+      },
+      "reference": "docker.io/bitnamilegacy/os-shell",
+      "original": "bitnamilegacy/os-shell",
+      "attributes": [],
+      "fingerprint": "2d8de2898632b61b"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "values.yaml",
+        "line": 6,
+        "column": 28
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "709e458362fc507e"
+    }
+  ],
+  "diagnostics": []
+}

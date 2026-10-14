@@ -1,10 +1,11 @@
 import json, re, subprocess, os, collections, sys
 
-pat = r'(bitnami(legacy|secure)?/[a-z0-9][a-z0-9._-]+|charts\.bitnami\.com/bitnami|bitnamicharts|allowInsecureImages:\s*true)'
+# image-shaped only: a Bitnami namespace not preceded by '/', '.' or a word char (excludes /opt/bitnami/..., github.com/bitnami/...)
+pat = r'((?<![/\w.])bitnami(legacy|secure)?/[a-z0-9][a-z0-9._-]+|charts\.bitnami\.com/bitnami|bitnamicharts|allowInsecureImages:\s*true)'
 show = sys.argv[1] if len(sys.argv) > 1 else 'other'
 tot = collections.Counter(); hit = collections.Counter(); misses = []
 for d in sorted(x for x in os.listdir('.') if os.path.isdir(x)):
-    out = subprocess.run(['rg', '-n', '-o', '-i', '--no-heading', pat, '-g', '*.y*ml', '-g', 'Dockerfile*',
+    out = subprocess.run(['rg', '-P', '-n', '-o', '-i', '--no-heading', pat, '-g', '*.y*ml', '-g', 'Dockerfile*',
                           '-g', '!*.md', '-g', '!**/README*', d], capture_output=True, text=True).stdout
     r = json.load(open(d + '.json'))
     found = {(f['location']['path'].replace(chr(92), '/'), f['location']['line']) for f in r['findings']}

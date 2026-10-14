@@ -26,6 +26,7 @@ const maxFileSize = 5 * 1024 * 1024
 type Options struct {
 	ConfigPath string
 	Clock      func() time.Time
+	Exclude    []string
 }
 
 // Scan walks root without changing it and returns a deterministic report.
@@ -93,6 +94,9 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 			return e
 		}
 		display := filepath.ToSlash(rel)
+		if excluded(display, options.Exclude) {
+			return nil
+		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			out.Summary.FilesSkipped++
 			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "symbolic link skipped"))
@@ -146,7 +150,8 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	}
 	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile")
-	if !yamlFile && !dockerfile {
+	templateText := strings.HasSuffix(lower, ".tpl") || (yamlFile && underChartTemplates(path))
+	if !yamlFile && !dockerfile && !templateText {
 		return out
 	}
 	if info.Size() > maxFileSize {
@@ -192,9 +197,45 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 		detected.Summary.FilesScanned = 1
 		return detected
 	}
+	if templateText {
+		detected := detect.Template(display, data)
+		detected.Summary.FilesScanned = 1
+		return detected
+	}
 	detected := detect.YAML(display, data)
+	if detect.HasTemplateMarkers(data) && detect.Malformed(detected) {
+		detected = detect.Template(display, data)
+	}
 	detected.Summary.FilesScanned = 1
 	return detected
+}
+
+// excluded reports whether a slash-separated relative path matches a --exclude
+// glob; excluded files are neither scanned nor skipped (spec section 7).
+func excluded(path string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if globMatch(pattern, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// underChartTemplates reports whether path is a YAML file in a Helm chart's
+// templates/ directory, i.e. a sibling of Chart.yaml (spec section 9.1).
+func underChartTemplates(path string) bool {
+	dir := filepath.Dir(path)
+	for {
+		if filepath.Base(dir) == "templates" {
+			_, err := os.Stat(filepath.Join(filepath.Dir(dir), "Chart.yaml"))
+			return err == nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 func appendReport(dst *diag.Report, src diag.Report) {
 	dst.Summary.FilesScanned += src.Summary.FilesScanned

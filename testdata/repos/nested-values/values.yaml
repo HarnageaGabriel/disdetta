@@ -1,0 +1,10 @@
+# Shape of camunda/camunda-platform-helm@24369e0 charts/camunda-platform-8.7/values.yaml.
+# allowInsecureImages under a subchart key, and a sysctlImage repository triple.
+identityKeycloak:
+  global:
+    security:
+      allowInsecureImages: true
+elasticsearch:
+  sysctlImage:
+    enabled: true
+    repository: bitnamilegacy/os-shell

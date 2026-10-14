@@ -51,7 +51,7 @@ func newVersionCmd(streams IO) *cobra.Command {
 }
 func newScanCmd(streams IO) *cobra.Command {
 	format, failOn, config := "table", "low", ""
-	var rules []string
+	var rules, exclude []string
 	cmd := &cobra.Command{Use: "scan [path]", Short: "Find Bitnami references in a repository", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if format != "table" && format != "json" {
 			return &exitError{ExitError, fmt.Errorf("invalid --format %q (want table or json)", format)}
@@ -71,7 +71,7 @@ func newScanCmd(streams IO) *cobra.Command {
 		if len(args) == 1 {
 			path = args[0]
 		}
-		result, e := repo.ScanWithOptions(cmd.Context(), path, repo.Options{ConfigPath: config, Clock: time.Now})
+		result, e := repo.ScanWithOptions(cmd.Context(), path, repo.Options{ConfigPath: config, Clock: time.Now, Exclude: exclude})
 		if e != nil {
 			return &exitError{ExitError, e}
 		}
@@ -106,6 +106,7 @@ func newScanCmd(streams IO) *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "table", "output format: table or json")
 	cmd.Flags().StringVar(&failOn, "fail-on", "low", "failure threshold: high, medium, low, or none")
 	cmd.Flags().StringArrayVar(&rules, "rule", nil, "include finding rule ID (repeatable)")
+	cmd.Flags().StringArrayVar(&exclude, "exclude", nil, "skip paths matching a slash-separated glob relative to the root (repeatable, ** supported)")
 	cmd.Flags().StringVar(&config, "config", "", "ignore configuration file (default .disdetta.yaml at scan root)")
 	return cmd
 }

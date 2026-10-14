@@ -47,11 +47,12 @@ func YAML(path string, data []byte) diag.Report {
 }
 
 type walkState struct {
-	path           string
-	keys           []string
-	globalRegistry string
-	depthReported  bool
-	out            *diag.Report
+	path            string
+	keys            []string
+	globalRegistry  string
+	depthReported   bool
+	templateComment bool
+	out             *diag.Report
 }
 
 func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
@@ -77,21 +78,10 @@ func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
 				case yaml.ScalarNode:
 					s.addImage(v.Value, v.Line+lineOffset, v.Column, embedded)
 				case yaml.MappingNode:
-					reg := mappingString(v, "registry")
-					if reg == "" {
-						reg = s.globalRegistry
-					}
-					repo := mappingString(v, "repository")
-					tag := mappingString(v, "tag")
-					digest := mappingString(v, "digest")
-					if repo != "" {
-						ref := imageref.Join(reg, repo, tag)
-						if digest != "" {
-							ref = imageref.Parse(ref.Original + "@" + digest)
-						}
-						s.addRef(ref, mappingLine(v, "repository")+lineOffset, mappingColumn(v, "repository"), embedded)
-					}
+					s.addSplitImage(v, lineOffset, embedded)
 				}
+			} else if v.Kind == yaml.MappingNode && isImageTriple(v) {
+				s.addSplitImage(v, lineOffset, embedded)
 			}
 			if isChartKey(k.Value) && v.Kind == yaml.ScalarNode && isBitnamiChartSource(v.Value) {
 				component := mappingString(n, "name")
@@ -127,7 +117,35 @@ func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
 func (s *walkState) addImage(v string, line, column int, embedded bool) {
 	s.addRef(imageref.Parse(v), line, column, embedded)
 }
+
+// addSplitImage reports an image triple (spec section 9): a mapping that has an
+// image-shaped repository, joined with its sibling registry, tag and digest.
+func (s *walkState) addSplitImage(v *yaml.Node, lineOffset int, embedded bool) {
+	repo := valueAt(v, "repository")
+	if repo == "" {
+		return
+	}
+	reg := valueAt(v, "registry")
+	if reg == "" {
+		reg = s.globalRegistry
+	}
+	ref := imageref.Join(reg, repo, valueAt(v, "tag"))
+	if digest := valueAt(v, "digest"); digest != "" {
+		ref = imageref.Parse(ref.Original + "@" + digest)
+	}
+	line, column := 0, 0
+	if rn := nodeAt(v, "repository"); rn != nil {
+		line, column = rn.Line, rn.Column
+	}
+	s.addRef(ref, line+lineOffset, column, embedded)
+}
 func (s *walkState) addRef(r imageref.Reference, line, column int, embedded bool) {
+	s.addRefConfidence(r, line, column, embedded, false)
+}
+
+// addRefConfidence records a finding. forceInferred marks a reference found
+// inside a template action, whose runtime value is not certain (section 9.1).
+func (s *walkState) addRefConfidence(r imageref.Reference, line, column int, embedded bool, forceInferred bool) {
 	if r.IsExcluded() {
 		return
 	}
@@ -162,11 +180,36 @@ func (s *walkState) addRef(r imageref.Reference, line, column int, embedded bool
 		confidence = diag.ConfidenceInferred
 		attrs = append(attrs, "mirror")
 	}
+	if forceInferred && confidence == diag.ConfidenceConfirmed {
+		confidence = diag.ConfidenceInferred
+	}
 	if embedded {
 		attrs = append(attrs, "embedded-values")
 	}
 	sort.Strings(attrs)
 	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: rule, Severity: sev, Confidence: confidence, Impact: catalog.Impact(r.Component()), Component: r.Component(), Location: loc(s.path, line, column), Reference: r.Safe, Original: r.SafeOriginal, Attributes: attrs})
+}
+
+// scanConfig reports DSD-CFG-001 for global.security.allowInsecureImages at any
+// depth (spec section 2.1), including under a subchart key such as keycloak.
+func (s *walkState) scanConfig(root *yaml.Node) {
+	s.scanConfigAt(root, 0)
+}
+func (s *walkState) scanConfigAt(n *yaml.Node, depth int) {
+	if n == nil || depth > maxYAMLDepth {
+		return
+	}
+	if n.Kind == yaml.MappingNode {
+		if v := nodeAt(n, "global", "security", "allowInsecureImages"); v != nil && v.Tag == "!!bool" {
+			var enabled bool
+			if v.Decode(&enabled) == nil && enabled {
+				s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CFG-001", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, v.Line, v.Column), Reference: "true", Original: "true", Attributes: []string{}})
+			}
+		}
+	}
+	for _, c := range n.Content {
+		s.scanConfigAt(c, depth+1)
+	}
 }
 
 // Dockerfile detects image references in FROM and external COPY instructions.
@@ -251,6 +294,21 @@ func newDiagnostic(code string, level diag.Level, path string, line, column int,
 	return diag.Diagnostic{Code: code, Level: level, Message: message, Location: loc(path, line, column)}
 }
 func isChartKey(k string) bool { return k == "repository" || k == "url" || k == "repoURL" }
+
+// isImageTriple reports whether n is a mapping shaped like a split image
+// reference (spec section 9): it carries a `repository` whose value is
+// image-shaped. Chart repository URLs are not image-shaped and stay out.
+func isImageTriple(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.MappingNode && isImageShaped(valueAt(n, "repository"))
+}
+
+func isImageShaped(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.HasPrefix(v, "/") || strings.Contains(v, "://") {
+		return false
+	}
+	return true
+}
 func isBitnamiChartSource(v string) bool {
 	v = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(v)), "/")
 	return v == "https://charts.bitnami.com/bitnami" || v == "oci://registry-1.docker.io/bitnamicharts" || v == "oci://docker.io/bitnamicharts"
@@ -263,22 +321,7 @@ func mappingString(n *yaml.Node, w string) string {
 	}
 	return ""
 }
-func mappingLine(n *yaml.Node, w string) int {
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == w {
-			return n.Content[i+1].Line
-		}
-	}
-	return n.Line
-}
-func mappingColumn(n *yaml.Node, w string) int {
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == w {
-			return n.Content[i+1].Column
-		}
-	}
-	return n.Column
-}
+
 func findString(n *yaml.Node, path []string) string {
 	for _, part := range path {
 		if n.Kind != yaml.MappingNode {

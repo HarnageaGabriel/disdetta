@@ -21,4 +21,5 @@ label the corpus (differential authorship, see CONVENTIONS.md).
 
 | Date | Commit | YAML/Dockerfile hits | `templates/` hits | Notes |
 | --- | --- | --- | --- | --- |
-| 2026-10-14 | 67b-dev (task 06) | 430 / 900 raw matches | 0 / 1480 | Precision: 25/25 sampled findings true. Real misses: Helm template text, subchart `global.security.allowInsecureImages`, `repository` under non-`image` keys (`sysctlImage`), vendored Bitnami charts. |
+| 2026-10-14 | task 06 | 430 / 900 broad matches | 0 / 2 image-shaped | Precision: 25/25 sampled findings true. Every `templates/` file reported malformed (exit 3 everywhere). Real misses: template text, subchart `global.security.allowInsecureImages`, `repository` under non-`image` keys (`sysctlImage`), vendored Bitnami charts. The broad pattern counted `/opt/bitnami/...` paths: replaced by an image-shaped pattern. |
+| 2026-10-14 | task 07 | 427 / 438 image-shaped | 2 / 2 | No exit 3. Remaining misses: chart repo URLs in non-standard files (`ct.yaml`, custom dependency lists), image under an arbitrary key, Bitnami namespace below a registry path (`ghcr.io/org` + `bitnami/x`). Correct non-findings: `bitnami/sealed-secrets-controller`, `bitnami/minideb` (excluded by spec). |
