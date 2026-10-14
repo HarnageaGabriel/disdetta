@@ -3,12 +3,14 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"github.com/HarnageaGabriel/disdetta/internal/report"
 	"github.com/HarnageaGabriel/disdetta/internal/scan/cluster"
 	"github.com/HarnageaGabriel/disdetta/internal/scan/repo"
+	"github.com/HarnageaGabriel/disdetta/internal/version"
 	"github.com/spf13/cobra"
 	"io"
 	"time"
@@ -48,7 +50,20 @@ func NewRootCmd(streams IO) *cobra.Command {
 	return root
 }
 func newVersionCmd(streams IO) *cobra.Command {
-	return &cobra.Command{Use: "version", Short: "Print version information", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { _, e := fmt.Fprintln(streams.Out, "disdetta dev"); return e }}
+	format := "text"
+	cmd := &cobra.Command{Use: "version", Short: "Print version information", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+		info := version.Get()
+		if format == "json" {
+			return json.NewEncoder(streams.Out).Encode(info)
+		}
+		if format != "text" {
+			return fmt.Errorf("invalid --format %q (want text or json)", format)
+		}
+		_, err := fmt.Fprintf(streams.Out, "disdetta %s\ncommit: %s\ndate: %s\n", info.Version, info.Commit, info.Date)
+		return err
+	}}
+	cmd.Flags().StringVar(&format, "format", "text", "output format: text or json")
+	return cmd
 }
 func newScanCmd(streams IO) *cobra.Command {
 	format, failOn, config := "table", "low", ""
