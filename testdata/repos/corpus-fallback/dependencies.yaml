@@ -1,0 +1,4 @@
+# Shape of linode/apl-core@984d959 charts/dependencies.yaml.
+dependencies:
+  - name: canvas
+    repository: https://charts.bitnami.com/bitnami

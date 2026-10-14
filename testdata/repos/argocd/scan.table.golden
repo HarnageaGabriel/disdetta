@@ -1,0 +1,5 @@
+LOCATION                RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
+application.yaml:12:15  DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/redis:7
+application.yaml:7:14   DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
+application.yaml:17:25  DSD-IMG-003  medium    confirmed   high    docker.io/bitnami/redis-exporter
+scanned 1 files, skipped 0, findings 3 (high 1, medium 2, low 0), diagnostics 0, unresolved 0, ignored 0

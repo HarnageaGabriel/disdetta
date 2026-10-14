@@ -1,0 +1,7 @@
+apiVersion: v2
+name: anonymous-app
+version: 0.1.0
+dependencies:
+  - name: postgresql
+    version: 16.0.0
+    repository: https://charts.bitnami.com/bitnami

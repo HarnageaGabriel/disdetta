@@ -1,0 +1,5 @@
+LOCATION                       RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
+.github/workflows/ci.yml:6:16  DSD-IMG-002  high      confirmed   high    docker.io/bitnami/redis:7
+.github/workflows/ci.yml:3:16  DSD-IMG-002  high      confirmed   medium  docker.io/bitnami/go:1
+.github/workflows/ci.yml:8:15  DSD-IMG-002  high      confirmed   low     docker.io/bitnami/kubectl:1
+scanned 1 files, skipped 0, findings 3 (high 3, medium 0, low 0), diagnostics 0, unresolved 0, ignored 0

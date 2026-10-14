@@ -1,0 +1,36 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - depguard
+    - errcheck
+    - errorlint
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    depguard:
+      rules:
+        pure:
+          list-mode: lax
+          files:
+            - "**/internal/imageref/**/*.go"
+            - "**/internal/detect/**/*.go"
+            - "**/internal/diag/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: "net/http$"
+              desc: "Pure packages must not perform I/O (CONVENTIONS.md)."
+            - pkg: "os$"
+              desc: "Pure packages must not perform I/O (CONVENTIONS.md)."
+            - pkg: "os/exec$"
+              desc: "Pure packages must not perform I/O (CONVENTIONS.md)."
+
+formatters:
+  enable:
+    - gofmt

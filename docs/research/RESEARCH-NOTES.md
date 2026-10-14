@@ -90,3 +90,48 @@ Not yet researched in depth. Search results (2026-10-12) point to AWS/EKS-orient
 4. Helm release Secret layout (verify from helm source).
 5. Mirrored-registry policy (private mirror of bitnamilegacy).
 6. Does the guard fail for charts older than the guard introduction.
+
+## 8. PostgreSQL -> CloudNativePG (study for the first verified plan, 2026-10-14)
+
+Sources:
+- CNPG API: https://cloudnative-pg.io/docs/devel/cloudnative-pg.v1 (Cluster, StorageConfiguration, PostgresConfiguration, MonitoringConfiguration, BackupConfiguration).
+- CNPG import: https://cloudnative-pg.io/docs/devel/database_import
+- Bitnami postgresql values: https://raw.githubusercontent.com/bitnami/charts/main/bitnami/postgresql/values.yaml
+VERIFY before shipping: pin both to versions (CNPG release, Bitnami chart major) and record the date.
+
+### Candidate mapping (each row becomes a catalog entry with its own source)
+
+| Bitnami key | CNPG field | Kind | Note |
+| --- | --- | --- | --- |
+| `architecture: standalone` | `spec.instances: 1` | constant | `instances` counts all instances, primary included. |
+| `architecture: replication` + `readReplicas.replicaCount: N` | `spec.instances: N+1` | transform | Bitnami read replicas are separate StatefulSets; CNPG instances are one cluster with automated failover (behavior change: list in checklist). |
+| `primary.persistence.size` | `spec.storage.size` | rename | Size cannot be decreased in CNPG. |
+| `primary.persistence.storageClass` | `spec.storage.storageClass` | rename | |
+| `primary.resources` | `spec.resources` | rename | Both core `ResourceRequirements`. |
+| `primary.resourcesPreset` | - | manual | Preset table lives in Bitnami `common`; only map with a sourced preset table. |
+| `primary.configuration` / `primary.extendedConfiguration` | `spec.postgresql.parameters` | transform | Parse `key = value` lines. Some parameters are operator-managed: VERIFY the fixed-parameter list in CNPG docs; those go to unmapped. |
+| `primary.pgHbaConfiguration` | `spec.postgresql.pg_hba` | transform | CNPG appends rules to its own; review required. |
+| `postgresqlSharedPreloadLibraries` (default `pgaudit`) | `spec.postgresql.shared_preload_libraries` | transform | Split on comma; added to CNPG defaults. VERIFY the extension exists in the CNPG operand image. |
+| `auth.database` | `spec.bootstrap.initdb.database` | rename | CNPG default `app`. |
+| `auth.username` | `spec.bootstrap.initdb.owner` | rename | |
+| `auth.existingSecret` | `spec.bootstrap.initdb.secret` | manual | Secret layout differs (CNPG: basic-auth username/password); checklist item, never copy values. |
+| `auth.enablePostgresUser`, `auth.postgresPassword` | `spec.enableSuperuserAccess`, `spec.superuserSecret` | manual | Default false in CNPG. |
+| `primary.initdb.scripts` | `spec.bootstrap.initdb.postInitApplicationSQL` | manual | Only SQL; shell scripts have no equivalent. |
+| `metrics.enabled` | - | manual | `monitoring.enablePodMonitor` is deprecated in CNPG; checklist: create a PodMonitor. |
+| `backup.*` (pg_dump CronJob) | `spec.backup` | unmapped | Different model (barman object store / volume snapshots). |
+| `tls.*` | `spec.certificates` | manual | |
+| `image.*` | `spec.imageName` | unmapped (by design) | Use the CNPG operand image of the same or newer major. |
+
+### Data migration (checklist inputs)
+- Import via `spec.bootstrap.initdb.import` (`microservice`: one database, roles not imported, `postImportApplicationSQL` supported; `monolith`: several databases, roles imported without SUPERUSER, `postgres` db skipped).
+- Offline: stop writes on the source before the final import; later changes are not copied.
+- Destination major >= source major; the destination's `pg_dump` is used.
+- Dumps are staged in the PGDATA volume: size storage for dump + data + indexes.
+- Source reachable from the new cluster; a user able to run `pg_dump` and read roles.
+
+## 9. Helm release storage (for the cluster scan)
+
+Source: https://github.com/helm/helm/blob/main/pkg/storage/driver/util.go
+- Release = JSON, gzip (best compression), then base64 (StdEncoding). Stored in Secret `data.release` (so the raw Secret payload is base64 of that string) with type `helm.sh/release.v1`, name `sh.helm.release.v1.<name>.v<revision>`.
+- Decoding checks the gzip magic `1f 8b 08`; uncompressed legacy payloads are plain JSON.
+- Implication: decompression must be bounded (zip-bomb defense) and the decoded JSON holds user values (`config`) that may contain credentials.

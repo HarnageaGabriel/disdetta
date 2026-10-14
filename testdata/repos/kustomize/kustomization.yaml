@@ -1,0 +1,5 @@
+images:
+  - name: example/redis
+    newName: bitnami/redis
+    newTag: "7"
+  - name: example/nginx

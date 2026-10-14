@@ -1,0 +1,8 @@
+default:
+  image:
+    name: bitnami/base:1
+build:
+  services:
+    - bitnami/redis:7
+variables:
+  image: bitnami/not-a-container:1

@@ -1,0 +1,3 @@
+apiVersion: v2
+name: data-space-connector
+version: 0.1.0

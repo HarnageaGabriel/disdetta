@@ -1,0 +1,4 @@
+LOCATION                          RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
+templates/helpers.tpl:2:1         DSD-IMG-002  high      inferred    low     docker.io/bitnami/kubectl:1.30
+templates/restart-job.yaml:12:18  DSD-IMG-003  medium    confirmed   low     docker.io/bitnami/kubectl:latest
+scanned 3 files, skipped 0, findings 2 (high 1, medium 1, low 0), diagnostics 3, unresolved 1, ignored 0

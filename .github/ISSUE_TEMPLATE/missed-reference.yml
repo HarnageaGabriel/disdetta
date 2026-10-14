@@ -1,0 +1,37 @@
+name: Missed or wrong finding
+description: disdetta missed a Bitnami reference, or reported something that is not one
+title: "detect: "
+labels: [area/detection]
+body:
+  - type: markdown
+    attributes:
+      value: False negatives are the most valuable reports. Remove secrets and private names; a minimal anonymized snippet is enough.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options: [Missed reference (false negative), Wrong finding (false positive), Wrong rule, severity or line]
+    validations:
+      required: true
+  - type: input
+    id: format
+    attributes:
+      label: File format
+      placeholder: values.yaml, Helm template, Flux HelmRelease, Argo CD Application, Dockerfile, GitLab CI, Terraform...
+    validations:
+      required: true
+  - type: textarea
+    id: snippet
+    attributes:
+      label: Minimal snippet
+      description: The smallest anonymized content that reproduces it, with the file name.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: disdetta output
+      description: Output of `disdetta scan <dir> --format json` on the snippet, and `disdetta version`.
+    validations:
+      required: true

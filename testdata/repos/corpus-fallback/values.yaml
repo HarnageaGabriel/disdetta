@@ -1,0 +1,5 @@
+# Corpus shapes:
+#   docs/spec/v0.1.md section 2.1 (bitnamilegacy under another registry)
+#   tmforum-oda/oda-canvas@75f29ac charts/canvas-oda/values.yaml
+mirrored: registry.example.internal/mirror/bitnamilegacy/redis:7.2
+kubectl: bitnamilegacy/kubectl:latest

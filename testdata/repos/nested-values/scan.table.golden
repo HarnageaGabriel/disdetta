@@ -1,0 +1,4 @@
+LOCATION           RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
+values.yaml:10:17  DSD-IMG-001  high      confirmed   low      docker.io/bitnamilegacy/os-shell
+values.yaml:6:28   DSD-CFG-001  high      confirmed   unknown  true
+scanned 1 files, skipped 0, findings 2 (high 2, medium 0, low 0), diagnostics 0, unresolved 0, ignored 0

@@ -1,0 +1,4 @@
+LOCATION             RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
+Dockerfile.test:2:1  DSD-IMG-002  high      confirmed   high    docker.io/bitnami/redis:7
+Dockerfile.test:5:1  DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16
+scanned 1 files, skipped 0, findings 2 (high 2, medium 0, low 0), diagnostics 0, unresolved 0, ignored 0

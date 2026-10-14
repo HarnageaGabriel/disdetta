@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 3,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 1,
+      "medium": 1,
+      "low": 0
+    },
+    "diagnostics": 3,
+    "unresolved": 1,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "inferred",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": "templates/helpers.tpl",
+        "line": 2,
+        "column": 1
+      },
+      "reference": "docker.io/bitnami/kubectl:1.30",
+      "original": "bitnami/kubectl:1.30",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "930c6121b99bcdda"
+    },
+    {
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": "templates/restart-job.yaml",
+        "line": 12,
+        "column": 18
+      },
+      "reference": "docker.io/bitnami/kubectl:latest",
+      "original": "bitnami/kubectl:latest",
+      "attributes": [],
+      "fingerprint": "b9cbcc6a211aa5ae"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "DSD-SCN-007",
+      "level": "info",
+      "message": "file read as template text",
+      "location": {
+        "path": "templates/helpers.tpl",
+        "line": 0,
+        "column": 0
+      }
+    },
+    {
+      "code": "DSD-SCN-007",
+      "level": "info",
+      "message": "file read as template text",
+      "location": {
+        "path": "templates/restart-job.yaml",
+        "line": 0,
+        "column": 0
+      }
+    },
+    {
+      "code": "DSD-SCN-003",
+      "level": "info",
+      "message": "unresolved reference without Bitnami evidence",
+      "location": {
+        "path": "templates/restart-job.yaml",
+        "line": 19,
+        "column": 18
+      }
+    }
+  ]
+}

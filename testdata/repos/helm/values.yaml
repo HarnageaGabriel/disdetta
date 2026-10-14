@@ -1,0 +1,11 @@
+global:
+  imageRegistry: docker.io
+  security:
+    allowInsecureImages: true
+image:
+  repository: bitnamilegacy/postgresql
+  tag: 16.4.0
+metrics:
+  image:
+    repository: bitnami/postgres-exporter
+    tag: latest

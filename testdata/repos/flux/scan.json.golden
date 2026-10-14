@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 1,
+      "medium": 1,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "repository.yaml",
+        "line": 16,
+        "column": 19
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "03d6ac8fdb69ee5b"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "repository.yaml",
+        "line": 7,
+        "column": 8
+      },
+      "reference": "oci://registry-1.docker.io/bitnamicharts",
+      "original": "oci://registry-1.docker.io/bitnamicharts",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "03fb6b78b16d67ff"
+    }
+  ],
+  "diagnostics": []
+}

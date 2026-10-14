@@ -1,0 +1,6 @@
+ARG REGISTRY=docker.io
+FROM --platform=linux/amd64 \
+  ${REGISTRY}/bitnami/redis:7 AS build
+COPY --from=build /tmp/x /tmp/x
+COPY --from=bitnamilegacy/postgresql:16 /tmp/y /tmp/y
+# FROM bitnami/comment:1

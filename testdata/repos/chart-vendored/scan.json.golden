@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 0,
+      "medium": 1,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-CHT-002",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "Chart.yaml",
+        "line": 14,
+        "column": 5
+      },
+      "reference": "https://github.com/bitnami/charts/tree/main/bitnami/postgresql",
+      "original": "https://github.com/bitnami/charts/tree/main/bitnami/postgresql",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "9287ab63828730b9"
+    }
+  ],
+  "diagnostics": []
+}

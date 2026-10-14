@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "compose.yaml",
+        "line": 3,
+        "column": 12
+      },
+      "reference": "docker.io/bitnami/postgresql:16",
+      "original": "bitnami/postgresql:16",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "b15499f873d57f5b"
+    }
+  ],
+  "diagnostics": []
+}

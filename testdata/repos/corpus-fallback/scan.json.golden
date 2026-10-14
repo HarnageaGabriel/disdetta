@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 3,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 2,
+      "medium": 2,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "inferred",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "values.yaml",
+        "line": 4,
+        "column": 11
+      },
+      "reference": "registry.example.internal/mirror/bitnamilegacy/redis:7.2",
+      "original": "registry.example.internal/mirror/bitnamilegacy/redis:7.2",
+      "attributes": [
+        "mirror"
+      ],
+      "fingerprint": "e49670e72e09e93e"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "inferred",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": "values.yaml",
+        "line": 5,
+        "column": 10
+      },
+      "reference": "docker.io/bitnamilegacy/kubectl:latest",
+      "original": "bitnamilegacy/kubectl:latest",
+      "attributes": [],
+      "fingerprint": "8864aec1c2362c88"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "ct.yaml",
+        "line": 3,
+        "column": 5
+      },
+      "reference": "https://charts.bitnami.com/bitnami/",
+      "original": "https://charts.bitnami.com/bitnami/",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "de7c0499926fb0a0"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "dependencies.yaml",
+        "line": 4,
+        "column": 17
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "ed3b9bdbf26d69dc"
+    }
+  ],
+  "diagnostics": []
+}

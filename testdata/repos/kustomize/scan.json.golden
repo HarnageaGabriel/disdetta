@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "kustomization.yaml",
+        "line": 3,
+        "column": 14
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "321599b6a24d57fc"
+    }
+  ],
+  "diagnostics": []
+}

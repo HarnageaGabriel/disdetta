@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 2,
+      "medium": 0,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": ".gitlab-ci.yml",
+        "line": 6,
+        "column": 7
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "d8c3093e68ec49b1"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "medium",
+      "component": "base",
+      "location": {
+        "path": ".gitlab-ci.yml",
+        "line": 3,
+        "column": 11
+      },
+      "reference": "docker.io/bitnami/base:1",
+      "original": "bitnami/base:1",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "c2da258e4d57fae6"
+    }
+  ],
+  "diagnostics": []
+}

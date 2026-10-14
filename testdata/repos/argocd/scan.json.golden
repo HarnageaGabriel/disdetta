@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 1,
+      "medium": 2,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "application.yaml",
+        "line": 12,
+        "column": 15
+      },
+      "reference": "docker.io/bitnamilegacy/redis:7",
+      "original": "bitnamilegacy/redis:7",
+      "attributes": [
+        "embedded-values"
+      ],
+      "fingerprint": "724adb2263839557"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "application.yaml",
+        "line": 7,
+        "column": 14
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "b12f0f1f80aaa467"
+    },
+    {
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis-exporter",
+      "location": {
+        "path": "application.yaml",
+        "line": 17,
+        "column": 25
+      },
+      "reference": "docker.io/bitnami/redis-exporter",
+      "original": "bitnami/redis-exporter",
+      "attributes": [
+        "embedded-values"
+      ],
+      "fingerprint": "e09ba9141ae24db6"
+    }
+  ],
+  "diagnostics": []
+}

@@ -1,0 +1,17 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: anonymous
+spec:
+  type: oci
+  url: oci://registry-1.docker.io/bitnamicharts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: anonymous
+spec:
+  values:
+    image:
+      repository: bitnami/redis
+      tag: 7
