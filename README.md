@@ -141,6 +141,11 @@ See [docs/PLAN.md](docs/PLAN.md). Study notes with sources and open
 
 ## Contributing
 
+- **Start here**: [good first issues](https://github.com/HarnageaGabriel/disdetta/labels/good%20first%20issue)
+  and [help wanted](https://github.com/HarnageaGabriel/disdetta/labels/help%20wanted). Many need
+  no Go at all: verifying a value mapping against the official docs of CloudNativePG, Valkey,
+  Strimzi, MongoDB or Keycloak ([kind/research](https://github.com/HarnageaGabriel/disdetta/labels/kind%2Fresearch))
+  is one of the most useful contributions.
 - **Try `scan` on your repositories** and tell us what it misses. Anonymized
   real-world values files that break detection are the most valuable
   contribution.
