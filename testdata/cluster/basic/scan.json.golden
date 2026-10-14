@@ -1,0 +1,478 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 10,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 10,
+      "medium": 3,
+      "low": 1
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true,
+    "releases": 2
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "cluster/db/Pod/cache-0",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnami/redis:7.2.4",
+      "original": "bitnami/redis:7.2.4",
+      "attributes": [
+        "mirror",
+        "pull-risk"
+      ],
+      "fingerprint": "e744bc16fe8c4c1b",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "Pod",
+        "name": "cache-0",
+        "container": "redis",
+        "release": "",
+        "chart": ""
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "cluster/db/ReplicaSet/standalone-rs",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnami/redis:7.2.4",
+      "original": "bitnami/redis:7.2.4",
+      "attributes": [
+        "mirror",
+        "pull-risk"
+      ],
+      "fingerprint": "689bce2c0ad6a30f",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "ReplicaSet",
+        "name": "standalone-rs",
+        "container": "redis",
+        "release": "",
+        "chart": ""
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "cluster/db/Secret/pg",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql:16.4.0",
+      "original": "docker.io/bitnamilegacy/postgresql:16.4.0",
+      "attributes": [],
+      "fingerprint": "c803dd4a535cde99",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "Secret",
+        "name": "pg",
+        "container": "",
+        "release": "pg",
+        "chart": "postgresql-16.4.0"
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "cluster/db/StatefulSet/pg",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnami/postgresql:16.4.0-debian-12-r2",
+      "original": "bitnami/postgresql:16.4.0-debian-12-r2",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "4a6320706fe8f092",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "StatefulSet",
+        "name": "pg",
+        "container": "postgresql",
+        "release": "pg",
+        "chart": "postgresql-16.4.0"
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": "cluster/db/Job/migrate",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnamilegacy/kubectl:1.29",
+      "original": "bitnamilegacy/kubectl:1.29",
+      "attributes": [],
+      "fingerprint": "92ac16b16c60be83",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "Job",
+        "name": "migrate",
+        "container": "migrate",
+        "release": "",
+        "chart": ""
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "os-shell",
+      "location": {
+        "path": "cluster/db/StatefulSet/pg",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnami/os-shell:12",
+      "original": "bitnami/os-shell:12",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "4e8bda2593f3f4c9",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "StatefulSet",
+        "name": "pg",
+        "container": "init",
+        "release": "pg",
+        "chart": "postgresql-16.4.0"
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": "cluster/shop/Deployment/web",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnamilegacy/kubectl:1.29",
+      "original": "bitnamilegacy/kubectl:1.29",
+      "attributes": [],
+      "fingerprint": "bbb0cb648514904f",
+      "resource": {
+        "context": "recorded",
+        "namespace": "shop",
+        "kind": "Deployment",
+        "name": "web",
+        "container": "debug",
+        "release": "web",
+        "chart": "web-1.2.3"
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "os-shell",
+      "location": {
+        "path": "cluster/shop/Deployment/web",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnamilegacy/os-shell:1",
+      "original": "bitnamilegacy/os-shell:1",
+      "attributes": [],
+      "fingerprint": "bcd02c242b9023e6",
+      "resource": {
+        "context": "recorded",
+        "namespace": "shop",
+        "kind": "Deployment",
+        "name": "web",
+        "container": "sidecar",
+        "release": "web",
+        "chart": "web-1.2.3"
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "nginx",
+      "location": {
+        "path": "cluster/shop/Deployment/web",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnami/nginx:1.25.3",
+      "original": "bitnami/nginx:1.25.3",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "a896478c6e180674",
+      "resource": {
+        "context": "recorded",
+        "namespace": "shop",
+        "kind": "Deployment",
+        "name": "web",
+        "container": "web",
+        "release": "web",
+        "chart": "web-1.2.3"
+      }
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "cluster/db/Secret/pg",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "8a7cd1873be08a10",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "Secret",
+        "name": "pg",
+        "container": "",
+        "release": "pg",
+        "chart": "postgresql-16.4.0"
+      }
+    },
+    {
+      "ruleId": "DSD-CHT-002",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "cluster/db/Secret/pg",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "https://github.com/bitnami/charts/tree/main/bitnami/postgresql",
+      "original": "https://github.com/bitnami/charts/tree/main/bitnami/postgresql",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "8b8233a98e32df7c",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "Secret",
+        "name": "pg",
+        "container": "",
+        "release": "pg",
+        "chart": "postgresql-16.4.0"
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": "cluster/db/CronJob/nightly",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnami/kubectl:latest",
+      "original": "bitnami/kubectl:latest",
+      "attributes": [],
+      "fingerprint": "1dae3b56921a54ae",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "CronJob",
+        "name": "nightly",
+        "container": "nightly",
+        "release": "",
+        "chart": ""
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "nginx",
+      "location": {
+        "path": "cluster/kube-system/DaemonSet/agent",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "docker.io/bitnamisecure/nginx:latest",
+      "original": "bitnamisecure/nginx:latest",
+      "attributes": [],
+      "fingerprint": "87eb15629b989ae7",
+      "resource": {
+        "context": "recorded",
+        "namespace": "kube-system",
+        "kind": "DaemonSet",
+        "name": "agent",
+        "container": "agent",
+        "release": "",
+        "chart": ""
+      }
+    },
+    {
+      "ruleId": "DSD-IMG-004",
+      "severity": "low",
+      "confidence": "inferred",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "cluster/db/Pod/pg-0",
+        "line": 0,
+        "column": 0
+      },
+      "reference": "registry.example.com/bitnami/postgresql:16.4.0",
+      "original": "registry.example.com/bitnami/postgresql:16.4.0",
+      "attributes": [
+        "mirror"
+      ],
+      "fingerprint": "4e7cec40ac90e20f",
+      "resource": {
+        "context": "recorded",
+        "namespace": "db",
+        "kind": "Pod",
+        "name": "pg-0",
+        "container": "postgresql",
+        "release": "",
+        "chart": ""
+      }
+    }
+  ],
+  "groups": [
+    {
+      "namespace": "db",
+      "name": "cache-0",
+      "component": "redis",
+      "severity": "high",
+      "impact": "high",
+      "fingerprints": [
+        "e744bc16fe8c4c1b"
+      ]
+    },
+    {
+      "namespace": "db",
+      "name": "pg",
+      "component": "postgresql",
+      "severity": "high",
+      "impact": "high",
+      "fingerprints": [
+        "c803dd4a535cde99",
+        "4a6320706fe8f092",
+        "4e8bda2593f3f4c9",
+        "8a7cd1873be08a10",
+        "8b8233a98e32df7c"
+      ]
+    },
+    {
+      "namespace": "db",
+      "name": "standalone-rs",
+      "component": "redis",
+      "severity": "high",
+      "impact": "high",
+      "fingerprints": [
+        "689bce2c0ad6a30f"
+      ]
+    },
+    {
+      "namespace": "db",
+      "name": "migrate",
+      "component": "kubectl",
+      "severity": "high",
+      "impact": "low",
+      "fingerprints": [
+        "92ac16b16c60be83"
+      ]
+    },
+    {
+      "namespace": "shop",
+      "name": "web",
+      "component": "kubectl",
+      "severity": "high",
+      "impact": "low",
+      "fingerprints": [
+        "bbb0cb648514904f",
+        "bcd02c242b9023e6",
+        "a896478c6e180674"
+      ]
+    },
+    {
+      "namespace": "db",
+      "name": "nightly",
+      "component": "kubectl",
+      "severity": "medium",
+      "impact": "low",
+      "fingerprints": [
+        "1dae3b56921a54ae"
+      ]
+    },
+    {
+      "namespace": "kube-system",
+      "name": "agent",
+      "component": "nginx",
+      "severity": "medium",
+      "impact": "low",
+      "fingerprints": [
+        "87eb15629b989ae7"
+      ]
+    },
+    {
+      "namespace": "db",
+      "name": "pg-0",
+      "component": "postgresql",
+      "severity": "low",
+      "impact": "high",
+      "fingerprints": [
+        "4e7cec40ac90e20f"
+      ]
+    }
+  ],
+  "diagnostics": []
+}

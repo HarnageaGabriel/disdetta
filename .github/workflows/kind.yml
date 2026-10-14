@@ -1,0 +1,39 @@
+name: Kind cluster scan
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Nightly at 03:17 UTC; the cluster scan needs docker and a network, so it
+    # does not run on pull requests.
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Install kind
+        # VERIFY: pinned for reproducible CI; update deliberately.
+        run: |
+          curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+      - name: Install helm
+        # VERIFY: pinned for reproducible CI; update deliberately.
+        run: |
+          curl -fsSL -o helm.tar.gz https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz
+          tar -xzf helm.tar.gz
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+          rm -rf linux-amd64 helm.tar.gz
+          helm version
+      - name: Run the cluster scan kind test
+        run: bash test/kind/run.sh

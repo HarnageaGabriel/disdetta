@@ -15,7 +15,7 @@ func TestExitCodeMatrix(t *testing.T) {
 		name string
 		args []string
 		want int
-	}{{"default", []string{"scan", finding}, 1}, {"above threshold", []string{"scan", finding, "--fail-on", "high"}, 1}, {"none", []string{"scan", finding, "--fail-on", "none"}, 0}, {"incomplete", []string{"scan", malformed}, 3}, {"usage", []string{"scan", "--fail-on", "bad"}, 2}, {"missing", []string{"scan", filepath.Join(t.TempDir(), "missing")}, 2}}
+	}{{"default", []string{"scan", finding}, 1}, {"above threshold", []string{"scan", finding, "--fail-on", "high"}, 1}, {"none", []string{"scan", finding, "--fail-on", "none"}, 0}, {"incomplete", []string{"scan", malformed}, 3}, {"usage", []string{"scan", "--fail-on", "bad"}, 2}, {"missing", []string{"scan", filepath.Join(t.TempDir(), "missing")}, 2}, {"cluster with path", []string{"scan", ".", "--cluster"}, 2}, {"cluster missing kubeconfig", []string{"scan", "--cluster", "--kubeconfig", filepath.Join(t.TempDir(), "missing")}, 2}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var out, err bytes.Buffer

@@ -1,0 +1,268 @@
+# Recorded Kubernetes objects for the cluster scan (spec v0.2 section 6).
+# A recorded cluster: every workload kind, owner filtering, tier 2 labels and a
+# Helm release Secret carrying a gzip-compressed, base64-encoded payload
+# (research notes section 9). One Opaque Secret holds a planted token that must
+# never appear in any output.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: web
+    helm.sh/chart: web-1.2.3
+  ownerReferences: []
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+        helm.sh/chart: web-1.2.3
+    spec:
+      containers:
+        - name: web
+          image: bitnami/nginx:1.25.3
+        - name: sidecar
+          image: bitnamilegacy/os-shell:1
+      ephemeralContainers:
+        - name: debug
+          image: bitnamilegacy/kubectl:1.29
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pg
+  namespace: db
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: pg
+    meta.helm.sh/release-name: pg
+    helm.sh/chart: postgresql-16.4.0
+spec:
+  serviceName: pg
+  selector:
+    matchLabels:
+      app: pg
+  template:
+    metadata:
+      labels:
+        app: pg
+    spec:
+      initContainers:
+        - name: init
+          image: bitnami/os-shell:12
+      containers:
+        - name: postgresql
+          image: bitnami/postgresql:16.4.0-debian-12-r2
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+    spec:
+      containers:
+        - name: agent
+          image: bitnamisecure/nginx:latest
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: web-7d9c
+  namespace: shop
+  ownerReferences:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: web
+      uid: 11111111-1111-1111-1111-111111111111
+      controller: true
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: bitnami/nginx:1.25.3
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: standalone-rs
+  namespace: db
+spec:
+  selector:
+    matchLabels:
+      app: cache
+  template:
+    metadata:
+      labels:
+        app: cache
+    spec:
+      containers:
+        - name: redis
+          image: bitnami/redis:7.2.4
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: db
+spec:
+  template:
+    metadata:
+      labels:
+        app: migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: bitnamilegacy/kubectl:1.29
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nightly-28917420
+  namespace: db
+  ownerReferences:
+    - apiVersion: batch/v1
+      kind: CronJob
+      name: nightly
+      uid: 22222222-2222-2222-2222-222222222222
+      controller: true
+spec:
+  template:
+    metadata:
+      labels:
+        app: nightly
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: nightly
+          image: bitnami/kubectl:latest
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly
+  namespace: db
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: nightly
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: nightly
+              image: bitnami/kubectl:latest
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pg-0
+  namespace: db
+spec:
+  containers:
+    - name: postgresql
+      image: registry.example.com/bitnami/postgresql:16.4.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cache-0
+  namespace: db
+  labels:
+    app: cache
+spec:
+  containers:
+    - name: redis
+      image: bitnami/redis:7.2.4
+status:
+  containerStatuses:
+    - name: redis
+      image: bitnami/redis:7.2.4
+      imageID: mycache.example.com/bitnami/redis@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      state:
+        running:
+          startedAt: "2026-10-14T08:00:00Z"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-abc123
+  namespace: shop
+  ownerReferences:
+    - apiVersion: apps/v1
+      kind: ReplicaSet
+      name: web-7d9c
+      uid: 33333333-3333-3333-3333-333333333333
+      controller: true
+spec:
+  containers:
+    - name: web
+      image: bitnami/redis:7.2.4
+status:
+  containerStatuses:
+    - name: web
+      image: bitnami/redis:7.2.4
+      imageID: mycache.example.com/bitnami/redis@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      state:
+        running:
+          startedAt: "2026-10-14T08:00:00Z"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-credentials
+  namespace: shop
+type: Opaque
+data:
+  token: cGxhbnRlZC1zZWNyZXQtdmFsdWUteHl6
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sh.helm.release.v1.pg.v1
+  namespace: db
+  labels:
+    owner: helm
+    name: pg
+    version: "1"
+    status: superseded
+type: helm.sh/release.v1
+data:
+  release: SDRzSUFBQUFBQUFDQ2sxUVFXckRRQXo4eTV3WHUybEtDL3VEdktIMElOdktXdFJldVN1NUpSai92YXdoSWJkQk01b1phVU9tbVJHeEpJUUQyMEo5SFF3ZEFuNjVtR2hHUEFWSXZpcmlCblB5MVJCaDY4TEZlT0FCZTBBL1V2SEt6K3cwa0ZQRmQzTTFUNFh0WjNyMnhPbTlPVGN2Q0JqMWtJM3VpOFcyN2NRenpkTDBPaVBBZEMwOUcrTG5RNURFeDdXci9GM2JIdkhXZW1GdVo1TDhJSjZ5di9iYVUvTlZVaTJYSnUxb09rN2lmaTNpdDRwcG12VHZrbzhSWDJaS05mcEtrM0hkZm5LTEc2VFNGUlJPWWw1dTlXL2FmM05wUkJGUWVGRVQxNE80RnlvOGlDSEFLU0hpbzNsdDNyRHYrLzRQM1VxYXg0c0JBQUE9
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sh.helm.release.v1.pg.v2
+  namespace: db
+  labels:
+    owner: helm
+    name: pg
+    version: "2"
+    status: deployed
+type: helm.sh/release.v1
+data:
+  release: SDRzSUFBQUFBQUFDQ2xWUU1XN0RNQXo4QzJmRmJ0T2lnMytRdlZ2UmdaWVpXWWdzcWlMZHdERDg5NEpHazZZYnhUdmRIVytGakJOQkJ5V0EyMmNwNkcweDlPRGdtNnBFenRBZEhjUjhadWhXRUVXZHhSaFVFaTgwd09iQWoxalYwSWtVQjFTMCtTYk5vcUdTZktWSFJYaCthMTZiSjNBdzhrNGJWWXQwYmR0SHpUakZ4dk1FRG9UbjZrbWcrN2dUUXRSeDdnMi9jZHZkWGxxdFJPMkVNZCtCQis5UEI1Z3pLMnJrTE5DdDIyYkJPWjlqc0xRaGNZOXB2NUQ4WEtNdU5tTktmRDNsZlVXbkNZTmwwVHFUZlg1UTcxWW9LSExsT3RndGMxYXF4ME5KbUpXR3d4MXlFRTNENkpWQ0ZLMkxOY24rUXJXSkRBNHFGWmFvdkFPL1p5UUs2SmYyWDVHSzRhOUVDNE1sdnZPRnJOcWJyZHI3Z0wxL1ByN0F0djBBZWNMR1Z1MEJBQUE9

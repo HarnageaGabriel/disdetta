@@ -34,7 +34,13 @@ func Table(w io.Writer, r diag.Report) error {
 		}
 	}
 	s := r.Summary
-	if _, e := fmt.Fprintf(tw, "scanned %d files, skipped %d, findings %d (high %d, medium %d, low %d), diagnostics %d, unresolved %d, ignored %d\n", s.FilesScanned, s.FilesSkipped, s.Findings.High+s.Findings.Medium+s.Findings.Low, s.Findings.High, s.Findings.Medium, s.Findings.Low, s.Diagnostics, s.Unresolved, s.Ignored); e != nil {
+	summary := fmt.Sprintf("scanned %d files, skipped %d, findings %d (high %d, medium %d, low %d), diagnostics %d, unresolved %d, ignored %d", s.FilesScanned, s.FilesSkipped, s.Findings.High+s.Findings.Medium+s.Findings.Low, s.Findings.High, s.Findings.Medium, s.Findings.Low, s.Diagnostics, s.Unresolved, s.Ignored)
+	if s.Releases > 0 {
+		// Cluster scans add the release count (spec v0.2 section 3); repository
+		// output is unchanged because Releases is zero there.
+		summary += fmt.Sprintf(", releases %d", s.Releases)
+	}
+	if _, e := fmt.Fprintln(tw, summary); e != nil {
 		return e
 	}
 	return tw.Flush()
@@ -50,8 +56,9 @@ func JSON(w io.Writer, r diag.Report) error {
 		} `json:"tool"`
 		Summary     diag.Summary      `json:"summary"`
 		Findings    []diag.Finding    `json:"findings"`
+		Groups      []diag.Group      `json:"groups,omitempty"`
 		Diagnostics []diag.Diagnostic `json:"diagnostics"`
-	}{SchemaVersion: "1", Summary: r.Summary, Findings: r.Findings, Diagnostics: r.Diagnostics}
+	}{SchemaVersion: "1", Summary: r.Summary, Findings: r.Findings, Groups: r.Groups, Diagnostics: r.Diagnostics}
 	v.Tool.Name = "disdetta"
 	v.Tool.Version = "dev"
 	if v.Findings == nil {

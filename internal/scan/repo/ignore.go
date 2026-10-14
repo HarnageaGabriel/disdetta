@@ -3,6 +3,7 @@ package repo
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -112,4 +113,22 @@ func globMatch(pattern, value string) bool {
 	b.WriteByte('$')
 	ok, _ := regexp.MatchString(b.String(), value)
 	return ok
+}
+
+// ApplyIgnoreFile reads an ignore file and applies it to r, adding the
+// expired-entry diagnostics (spec v0.1 section 6). It is the v0.1 ignore
+// contract reused by the cluster scan (spec v0.2 section 1): --config is the
+// only ignore source there because a cluster scan has no root. A missing or
+// invalid file is an error.
+func ApplyIgnoreFile(r *diag.Report, path string, now time.Time) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read ignore file %s: %w", path, err)
+	}
+	entries, err := parseIgnores(data)
+	if err != nil {
+		return err
+	}
+	applyIgnores(r, entries, now, path)
+	return nil
 }

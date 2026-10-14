@@ -10,17 +10,20 @@
     "summary": {"type": "object", "required": ["filesScanned", "filesSkipped", "findings", "diagnostics", "unresolved", "ignored", "complete"], "properties": {
       "filesScanned": {"type": "integer", "minimum": 0}, "filesSkipped": {"type": "integer", "minimum": 0},
       "findings": {"type": "object", "required": ["high", "medium", "low"], "properties": {"high": {"type": "integer", "minimum": 0}, "medium": {"type": "integer", "minimum": 0}, "low": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
-      "diagnostics": {"type": "integer", "minimum": 0}, "unresolved": {"type": "integer", "minimum": 0}, "ignored": {"type": "integer", "minimum": 0}, "complete": {"type": "boolean"}
+      "diagnostics": {"type": "integer", "minimum": 0}, "unresolved": {"type": "integer", "minimum": 0}, "ignored": {"type": "integer", "minimum": 0}, "releases": {"type": "integer", "minimum": 0}, "complete": {"type": "boolean"}
     }, "additionalProperties": false},
     "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "groups": {"type": "array", "items": {"$ref": "#/$defs/group"}},
     "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
   },
   "additionalProperties": false,
   "$defs": {
     "location": {"type": "object", "required": ["path", "line", "column"], "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 0}, "column": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
     "finding": {"type": "object", "required": ["ruleId", "severity", "confidence", "impact", "component", "location", "reference", "original", "attributes", "fingerprint"], "properties": {
-      "ruleId": {"enum": ["DSD-CFG-001", "DSD-IMG-001", "DSD-IMG-002", "DSD-IMG-003", "DSD-IMG-004", "DSD-CHT-001", "DSD-CHT-002"]}, "severity": {"enum": ["high", "medium", "low"]}, "confidence": {"enum": ["confirmed", "inferred", "unresolved"]}, "impact": {"enum": ["high", "medium", "low", "unknown"]}, "component": {"type": "string"}, "location": {"$ref": "#/$defs/location"}, "reference": {"type": "string"}, "original": {"type": "string"}, "attributes": {"type": "array", "items": {"enum": ["mirror", "pull-risk", "chart", "embedded-values"]}}, "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{16}$"}
+      "ruleId": {"enum": ["DSD-CFG-001", "DSD-IMG-001", "DSD-IMG-002", "DSD-IMG-003", "DSD-IMG-004", "DSD-CHT-001", "DSD-CHT-002"]}, "severity": {"enum": ["high", "medium", "low"]}, "confidence": {"enum": ["confirmed", "inferred", "unresolved"]}, "impact": {"enum": ["high", "medium", "low", "unknown"]}, "component": {"type": "string"}, "location": {"$ref": "#/$defs/location"}, "reference": {"type": "string"}, "original": {"type": "string"}, "attributes": {"type": "array", "items": {"enum": ["mirror", "pull-risk", "chart", "embedded-values"]}}, "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{16}$"}, "resource": {"$ref": "#/$defs/resource"}
     }, "additionalProperties": false},
-    "diagnostic": {"type": "object", "required": ["code", "level", "message", "location"], "properties": {"code": {"enum": ["DSD-SCN-001", "DSD-SCN-002", "DSD-SCN-003", "DSD-SCN-004", "DSD-SCN-005", "DSD-SCN-006", "DSD-SCN-007", "DSD-SCN-008"]}, "level": {"enum": ["error", "warning", "info"]}, "message": {"type": "string"}, "location": {"$ref": "#/$defs/location"}}, "additionalProperties": false}
+    "diagnostic": {"type": "object", "required": ["code", "level", "message", "location"], "properties": {"code": {"enum": ["DSD-SCN-001", "DSD-SCN-002", "DSD-SCN-003", "DSD-SCN-004", "DSD-SCN-005", "DSD-SCN-006", "DSD-SCN-007", "DSD-SCN-008", "DSD-SCN-009", "DSD-SCN-010"]}, "level": {"enum": ["error", "warning", "info"]}, "message": {"type": "string"}, "location": {"$ref": "#/$defs/location"}}, "additionalProperties": false},
+    "resource": {"type": "object", "required": ["context", "namespace", "kind", "name", "container", "release", "chart"], "properties": {"context": {"type": "string"}, "namespace": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "container": {"type": "string"}, "release": {"type": "string"}, "chart": {"type": "string"}}, "additionalProperties": false},
+    "group": {"type": "object", "required": ["namespace", "name", "component", "severity", "impact", "fingerprints"], "properties": {"namespace": {"type": "string"}, "name": {"type": "string"}, "component": {"type": "string"}, "severity": {"enum": ["high", "medium", "low"]}, "impact": {"enum": ["high", "medium", "low", "unknown"]}, "fingerprints": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{16}$"}}}, "additionalProperties": false}
   }
 }
