@@ -98,7 +98,7 @@ func Scan(ctx context.Context, root string) (diag.Report, error) {
 	return result, nil
 }
 
-func scanFile(path, displayPath string, info fs.FileInfo) diag.Report {
+func scanFile(path, displayPath string, info fs.FileInfo) (report diag.Report) {
 	lower := strings.ToLower(info.Name())
 	isYAML := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 	isDockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.")
@@ -112,7 +112,19 @@ func scanFile(path, displayPath string, info fs.FileInfo) diag.Report {
 	if err != nil {
 		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file could not be read: "+err.Error())}}
 	}
-	defer file.Close()
+	readSucceeded := false
+	defer func() {
+		closeErr := file.Close()
+		if closeErr == nil {
+			return
+		}
+		if !readSucceeded {
+			// The read already failed and produced a diagnostic; the close error
+			// carries no additional signal here and is deliberately ignored.
+			return
+		}
+		report.Diagnostics = append(report.Diagnostics, scanDiagnostic(displayPath, "file could not be closed: "+closeErr.Error()))
+	}()
 	openedInfo, err := file.Stat()
 	if err != nil {
 		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file metadata could not be read: "+err.Error())}}
@@ -124,6 +136,7 @@ func scanFile(path, displayPath string, info fs.FileInfo) diag.Report {
 	if err != nil {
 		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file could not be read: "+err.Error())}}
 	}
+	readSucceeded = true
 	if len(data) > maxFileSize {
 		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file exceeds 5 MiB limit; skipped")}}
 	}

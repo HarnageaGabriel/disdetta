@@ -4,6 +4,7 @@ package detect
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 
@@ -30,7 +31,7 @@ func YAML(path string, data []byte) diag.Report {
 		var document yaml.Node
 		err := decoder.Decode(&document)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			result.Diagnostics = append(result.Diagnostics, scanDiagnostic(path, 0, "malformed YAML: "+err.Error()))
@@ -77,9 +78,10 @@ func (s *yamlWalkState) walk(node *yaml.Node, lineOffset, depth int) {
 				s.result.Findings = append(s.result.Findings, finding("DSD-001", diag.SeverityAllowInsecure, "allowInsecureImages is enabled", "true", "configuration", s.path, value.Line+lineOffset, false))
 			}
 			if key.Value == "image" {
-				if value.Kind == yaml.ScalarNode {
+				switch value.Kind {
+				case yaml.ScalarNode:
 					addImage(s.path, value.Value, value.Line+lineOffset, &s.result.Findings)
-				} else if value.Kind == yaml.MappingNode {
+				case yaml.MappingNode:
 					registry := mappingString(value, "registry")
 					if registry == "" {
 						registry = s.globalRegistry

@@ -142,7 +142,7 @@ func validTag(tag string) bool {
 		return false
 	}
 	for i, r := range tag {
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || (i > 0 && (r == '.' || r == '-'))) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && (i <= 0 || (r != '.' && r != '-')) {
 			return false
 		}
 	}
@@ -158,7 +158,7 @@ func validDigest(digest string) bool {
 		return false
 	}
 	for _, r := range algorithm {
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("+._-", r)) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("+._-", r) {
 			return false
 		}
 	}
@@ -191,7 +191,7 @@ func containsUnsafe(value string) bool {
 
 func safeName(value string) string {
 	for index, r := range value {
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("._:/-", r)) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("._:/-", r) {
 			return strings.TrimRight(value[:index], "._:/-")
 		}
 	}
