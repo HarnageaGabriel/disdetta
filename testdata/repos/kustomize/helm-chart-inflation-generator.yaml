@@ -1,0 +1,10 @@
+apiVersion: builtin
+kind: HelmChartInflationGenerator
+metadata: {name: pg}
+name: postgresql
+repo: https://charts.bitnami.com/bitnami
+version: 12.5.6
+valuesInline:
+  image:
+    repository: bitnamilegacy/postgresql
+    tag: 16.4.0
