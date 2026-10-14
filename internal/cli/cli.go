@@ -44,7 +44,7 @@ func NewRootCmd(streams IO) *cobra.Command {
 	root := &cobra.Command{Use: "disdetta", Short: "Find Bitnami dependencies before migration", Args: cobra.NoArgs, SilenceUsage: true, SilenceErrors: true}
 	root.SetOut(streams.Out)
 	root.SetErr(streams.Err)
-	root.AddCommand(newVersionCmd(streams), newScanCmd(streams))
+	root.AddCommand(newVersionCmd(streams), newScanCmd(streams), newPlanCmd(streams))
 	return root
 }
 func newVersionCmd(streams IO) *cobra.Command {

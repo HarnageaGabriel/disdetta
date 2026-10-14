@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -106,4 +107,38 @@ func decompress(payload []byte) ([]byte, error) {
 // decoded Helm release.
 func looksLikeJSON(data []byte) bool {
 	return len(data) > 0 && data[0] == '{'
+}
+
+// PlanRelease is the subset of a Helm release needed by the plan command.
+// Config remains in memory and callers must apply plan redaction rules.
+type PlanRelease struct {
+	Name    string
+	Chart   string
+	Version string
+	Config  map[string]any
+}
+
+// DecodePlanRelease reuses the bounded tier-3 decoder for plan input.
+func DecodePlanRelease(name string, payload []byte) (PlanRelease, error) {
+	decoded, err := DecodeReleasePayload(payload)
+	if err != nil {
+		return PlanRelease{}, err
+	}
+	var document struct {
+		Name  string `json:"name"`
+		Chart struct {
+			Metadata struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"metadata"`
+		} `json:"chart"`
+		Config map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(decoded, &document); err != nil {
+		return PlanRelease{}, fmt.Errorf("decode helm release JSON: %w", err)
+	}
+	if document.Name != "" {
+		name = document.Name
+	}
+	return PlanRelease{Name: name, Chart: document.Chart.Metadata.Name, Version: document.Chart.Metadata.Version, Config: document.Config}, nil
 }

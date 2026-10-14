@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "required": ["schemaVersion", "chart", "appliesTo", "maturity", "routes", "mappings", "checklist"],
+  "properties": {
+    "schemaVersion": {"const": "1"}, "chart": {"type": "string"}, "appliesTo": {"type": "string"},
+    "maturity": {"enum": ["verified", "partial", "route-only"]},
+    "routes": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["id", "target", "source"], "properties": {"id": {"type": "string"}, "target": {"type": "object", "required": ["name", "kind", "apiVersion"]}, "source": {"$ref": "#/$defs/sourceVerified"}}}},
+    "mappings": {"type": "array", "items": {"type": "object", "required": ["from", "kind", "source"], "properties": {"from": {"type": "string"}, "to": {"type": "string"}, "kind": {"enum": ["rename", "constant", "transform", "manual", "unmapped"]}, "transform": {"type": "string"}, "note": {"type": "string"}, "source": {"$ref": "#/$defs/sourceVerified"}}}},
+    "checklist": {"type": "array", "items": {"type": "object", "required": ["id", "text", "source"], "properties": {"id": {"type": "string"}, "text": {"type": "string"}, "source": {"$ref": "#/$defs/source"}}}}
+  },
+  "$defs": {"source": {"type": "object", "required": ["url"], "properties": {"url": {"type": "string", "pattern": "^https://"}}}, "sourceVerified": {"type": "object", "required": ["url", "verified"], "properties": {"url": {"type": "string", "pattern": "^https://"}, "verified": {"type": "string", "format": "date"}}}}
+}

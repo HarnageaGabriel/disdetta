@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+  "required": ["schemaVersion", "release", "chart", "chartVersion", "route", "maturity", "target", "unmapped", "checklist", "coverage"],
+  "properties": {
+    "schemaVersion": {"const": "1"}, "release": {"type": "string"}, "chart": {"type": "string"}, "chartVersion": {"type": "string"}, "route": {"type": "string"}, "maturity": {"type": "string"}, "target": {"type": "object"},
+    "unmapped": {"type": "array", "items": {"type": "object", "required": ["path", "kind", "note"], "properties": {"path": {"type": "string"}, "kind": {"enum": ["manual", "unmapped", "unknown"]}, "note": {"type": "string"}}}},
+    "checklist": {"type": "array", "items": {"type": "object", "required": ["text", "source"], "properties": {"text": {"type": "string"}, "source": {"type": "string", "pattern": "^https://"}}}},
+    "coverage": {"type": "object", "required": ["mapped", "total"], "properties": {"mapped": {"type": "integer", "minimum": 0}, "total": {"type": "integer", "minimum": 0}}}
+  }
+}

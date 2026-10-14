@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "1",
+  "release": "pg",
+  "chart": "postgresql",
+  "chartVersion": "16.7.4",
+  "route": "cloudnative-pg",
+  "maturity": "partial",
+  "target": {
+    "apiVersion": "postgresql.cnpg.io/v1",
+    "kind": "Cluster",
+    "metadata": {
+      "name": "pg"
+    },
+    "spec": {
+      "instances": 1
+    }
+  },
+  "unmapped": [
+    {
+      "path": "auth.existingSecret",
+      "kind": "manual",
+      "note": "Create a CNPG basic-auth Secret; the Bitnami Secret layout differs."
+    },
+    {
+      "path": "auth.password",
+      "kind": "manual",
+      "note": "Create a CNPG basic-auth Secret; password values are never copied."
+    }
+  ],
+  "checklist": [
+    {
+      "text": "Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped).",
+      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+    },
+    {
+      "text": "Stop writes on the source before the final import; later changes are not copied.",
+      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+    },
+    {
+      "text": "Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used.",
+      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+    },
+    {
+      "text": "Size PGDATA for the staged dump, data, and indexes.",
+      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+    },
+    {
+      "text": "Ensure the source is reachable and the import user can run pg_dump and read roles.",
+      "source": "https://cloudnative-pg.io/docs/devel/database_import"
+    },
+    {
+      "text": "CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2.",
+      "source": "https://cloudnative-pg.io/docs/devel/postgresql_conf"
+    },
+    {
+      "text": "On PostgreSQL 14+, review any md5 pg_hba rules before the default scram-sha-256 catch-all.",
+      "source": "https://cloudnative-pg.io/docs/devel/postgresql_conf"
+    },
+    {
+      "text": "Resolve auth.existingSecret: Create a CNPG basic-auth Secret; the Bitnami Secret layout differs.",
+      "source": "https://cloudnative-pg.io/docs/devel/cloudnative-pg.v1"
+    },
+    {
+      "text": "Resolve auth.password: Create a CNPG basic-auth Secret; password values are never copied.",
+      "source": "https://cloudnative-pg.io/docs/devel/cloudnative-pg.v1"
+    }
+  ],
+  "coverage": {
+    "mapped": 1,
+    "total": 3
+  }
+}

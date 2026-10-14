@@ -1,0 +1,27 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pg
+spec:
+  chart:
+    spec:
+      chart: postgresql
+      version: 16.7.4
+  values:
+    architecture: standalone
+    auth:
+      password: PLANTED-secret-token-123
+      database: app
+    primary:
+      configuration: |
+        listen_addresses = '*'
+        port = 5433
+        pgaudit.log = 'write, ddl'
+        pg_stat_statements.max = 10000
+        include = 'private.conf'
+      extendedConfiguration: |
+        auto_explain.log_min_duration = '1s'
+      pgHbaConfiguration: |
+        # application clients
+        host all all 10.0.0.0/8 md5
+    postgresqlSharedPreloadLibraries: pgaudit,vector
