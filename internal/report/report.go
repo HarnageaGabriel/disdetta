@@ -114,7 +114,3 @@ func SafeText(v string) string {
 	}
 	return b.String()
 }
-
-// safeCell is retained for package-local tests and older callers. All human
-// renderers should use SafeText so the escaping contract stays centralized.
-func safeCell(v string) string { return SafeText(v) }

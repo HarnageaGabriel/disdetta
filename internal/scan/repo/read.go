@@ -80,7 +80,7 @@ func ReadFile(path string) ([]byte, error) {
 	return readRegularFile(path, info)
 }
 
-func readRegularFile(path string, expected fs.FileInfo) ([]byte, error) {
+func readRegularFile(path string, expected fs.FileInfo) (data []byte, err error) {
 	if expected.Mode()&os.ModeSymlink != 0 || !expected.Mode().IsRegular() {
 		return nil, ErrUnsafeFile
 	}
@@ -91,7 +91,11 @@ func readRegularFile(path string, expected fs.FileInfo) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 	opened, err := file.Stat()
 	if err != nil {
 		return nil, err
@@ -99,7 +103,7 @@ func readRegularFile(path string, expected fs.FileInfo) ([]byte, error) {
 	if !opened.Mode().IsRegular() || !os.SameFile(expected, opened) {
 		return nil, ErrUnsafeFile
 	}
-	data, err := io.ReadAll(io.LimitReader(file, MaxFileSize+1))
+	data, err = io.ReadAll(io.LimitReader(file, MaxFileSize+1))
 	if err != nil {
 		return nil, err
 	}

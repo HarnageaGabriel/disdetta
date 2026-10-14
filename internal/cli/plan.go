@@ -133,14 +133,14 @@ func clusterPlanInput(ctx context.Context, release string, opts cluster.Options)
 	if len(matched) > 1 {
 		return plan.Input{}, fmt.Errorf("release %q is ambiguous across namespaces", release)
 	}
-	for _, r := range matched {
-		d, e := cluster.DecodePlanRelease(r.Name, r.Payload)
-		if e != nil {
-			return plan.Input{}, e
-		}
-		return plan.Input{Release: d.Name, Chart: d.Chart, ChartVersion: d.Version, Values: d.Config}, nil
+	if len(matched) == 0 {
+		return plan.Input{}, fmt.Errorf("release %q not found", release)
 	}
-	return plan.Input{}, fmt.Errorf("release %q not found", release)
+	d, err := cluster.DecodePlanRelease(matched[0].Name, matched[0].Payload)
+	if err != nil {
+		return plan.Input{}, err
+	}
+	return plan.Input{Release: d.Name, Chart: d.Chart, ChartVersion: d.Version, Values: d.Config}, nil
 }
 func writePlanDir(dir string, p plan.Plan, format string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {

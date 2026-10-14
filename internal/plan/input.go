@@ -2,6 +2,7 @@ package plan
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -125,7 +126,7 @@ func decodeMaps(data []byte) ([]map[string]any, error) {
 	for {
 		var doc yaml.Node
 		if err := dec.Decode(&doc); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return out, nil
 			}
 			return nil, err
