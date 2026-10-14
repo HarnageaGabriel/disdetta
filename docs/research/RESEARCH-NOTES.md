@@ -148,3 +148,11 @@ Sources: https://cloudnative-pg.io/docs/devel/postgresql_conf and https://github
 ### 8.2 Pins (2026-10-14)
 - CloudNativePG: latest release **v1.30.1** (GitHub releases). The 1.30 docs (https://cloudnative-pg.io/docs/1.30/postgresql_conf) list the same fixed parameters, managed libraries (`auto_explain`, `pg_stat_statements`, `pgaudit`, `pg_failover_slots`) and `ssl_min_protocol_version` default (TLSv1.3) as section 8.1. Catalog sources use `https://cloudnative-pg.io/docs/1.30/...`.
 - Bitnami `postgresql` chart: keys used by the mappings (`architecture`, `auth.username`, `auth.database`, `primary.configuration`, `primary.extendedConfiguration`, `primary.pgHbaConfiguration`, `postgresqlSharedPreloadLibraries`, `primary.persistence.size`, `primary.persistence.storageClass`, `primary.resources`, `readReplicas.replicaCount`) are present in the values of tags `postgresql/16.0.0` and `postgresql/17.1.2` (the last tag in git; `main` is 17.1.2). Verified range: `>=16.0.0 <18.0.0`. Later chart versions exist only as OCI artifacts in `bitnamicharts` and need a separate check before widening the range.
+
+## 10. Flux HelmRelease values precedence (2026-10-14)
+
+Source: https://fluxcd.io/flux/components/helm/helmreleases/ (Values references)
+- `spec.valuesFrom` entries are merged in list order, later overwriting earlier; `spec.values` (inline) is merged **last** and wins.
+- Exception: an entry with `targetPath` "will overwrite everything before, including inline values".
+- `optional: true` only tolerates a missing referent; other errors still fail.
+Implication for `plan --from-repo`: files passed with `--values` stand in for `valuesFrom` and are merged **before** the inline `spec.values`; a `valuesFrom` entry with `targetPath` cannot be reproduced from files alone and is a usage error.
