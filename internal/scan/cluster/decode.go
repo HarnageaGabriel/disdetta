@@ -46,6 +46,12 @@ func DecodeReleasePayload(encoded []byte) ([]byte, error) {
 	if len(trimmed) == 0 {
 		return nil, ErrReleaseNotDecodable
 	}
+	// Reject an over-long encoding before allocating its decoded form: decoding
+	// a hostile value would otherwise allocate past the compressed cap
+	// (review 03 m1, spec v0.2 section 4).
+	if len(trimmed) > base64.StdEncoding.EncodedLen(MaxReleasePayloadSize) {
+		return nil, ErrReleasePayloadTooLarge
+	}
 	payload, err := base64.StdEncoding.DecodeString(string(trimmed))
 	if err != nil {
 		// A legacy, uncompressed payload is plain JSON (research notes section 9).
@@ -74,7 +80,7 @@ func DecodeReleasePayload(encoded []byte) ([]byte, error) {
 func decompress(payload []byte) ([]byte, error) {
 	zr, err := gzip.NewReader(bytes.NewReader(payload))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrReleaseNotDecodable, err)
+		return nil, fmt.Errorf("%w: %w", ErrReleaseNotDecodable, err)
 	}
 	defer func() { _ = zr.Close() }()
 	// One member only: a concatenated-member stream must not bypass the cap.
@@ -85,7 +91,7 @@ func decompress(payload []byte) ([]byte, error) {
 	}
 	out, err := io.ReadAll(io.LimitReader(zr, int64(limit)+1))
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%w: %v", ErrReleaseNotDecodable, err)
+		return nil, fmt.Errorf("%w: %w", ErrReleaseNotDecodable, err)
 	}
 	if len(out) > limit {
 		if limit == MaxReleaseDecodedSize {

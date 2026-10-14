@@ -18,6 +18,19 @@ const (
 	clusterName = "disdetta-cluster-scan"
 	namespace   = "db"
 	chartRef    = "oci://registry-1.docker.io/bitnamicharts/postgresql"
+	// chartVersion pins the chart so the test does not drift with the published
+	// chart (review 03 m5).
+	chartVersion = "16.7.9"
+	// imageTag is the tag the pinned chart resolves to in
+	// docker.io/bitnamilegacy/postgresql.
+	// Verified 2026-10-14 on Docker Hub: bitnamilegacy/postgresql:17.6.0-debian-12-r4
+	// exists; chart 16.7.9 exists in bitnamicharts.
+	imageTag = "17.6.0-debian-12-r4"
+	// nodeImage pins the kind node so the Kubernetes minor stays within the
+	// client-go v0.37 skew support (review 03 m5).
+	// Verified 2026-10-14: default node image of kind v0.33.0 (see kind.yml),
+	// Kubernetes 1.37 matches client-go v0.37.
+	nodeImage = "kindest/node:v1.37.0"
 )
 
 // TestKindBitnamiChart installs the Bitnami postgresql chart with a
@@ -39,7 +52,7 @@ func TestKindBitnamiChart(t *testing.T) {
 	binary := filepath.Join(work, "disdetta")
 	runCommand(t, repoRoot, "go", "build", "-o", binary, "./cmd/disdetta")
 
-	runCommand(t, repoRoot, "kind", "create", "cluster", "--name", clusterName, "--wait", "120s")
+	runCommand(t, repoRoot, "kind", "create", "cluster", "--name", clusterName, "--image", nodeImage, "--wait", "120s")
 	t.Cleanup(func() {
 		_ = exec.Command("kind", "delete", "cluster", "--name", clusterName).Run()
 	})
@@ -51,9 +64,11 @@ func TestKindBitnamiChart(t *testing.T) {
 	}
 
 	runCommand(t, repoRoot, "helm", "install", "pg", chartRef,
+		"--version", chartVersion,
 		"--kubeconfig", kubeconfig,
 		"--namespace", namespace, "--create-namespace",
 		"--set", "image.repository=bitnamilegacy/postgresql",
+		"--set", "image.tag="+imageTag,
 		"--set", "global.security.allowInsecureImages=true",
 		"--timeout", "5m")
 

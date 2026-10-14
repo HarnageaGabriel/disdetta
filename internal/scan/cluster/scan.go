@@ -93,6 +93,12 @@ func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error)
 		releases, relFailures := source.ListReleases(ctx, opts.Namespaces)
 		for _, f := range relFailures {
 			out.Diagnostics = append(out.Diagnostics, listDiagnostic(f))
+			if f.Forbidden {
+				// Tier 3 is off by default, but a requested list that RBAC forbids
+				// means the requested scan is incomplete (review 03 M2, spec v0.2
+				// section 4).
+				mandatoryIncomplete = true
+			}
 		}
 		out.Summary.FilesScanned += len(releases)
 		for _, rel := range releases {
@@ -126,20 +132,21 @@ func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error)
 // workloadFindings scans every container of one workload template (spec v0.2
 // section 3).
 func workloadFindings(context string, w Workload, registries map[string]map[string]bool) []diag.Finding {
-	return containerFindings(context, w.Namespace, w.Kind, w.Name, w.Labels, w.Containers, registries)
+	return containerFindings(context, w.Namespace, w.Kind, w.Name, w.Owners, w.Labels, w.Containers, registries)
 }
 
 // podFindings scans a standalone pod's containers (spec v0.2 section 3).
 func podFindings(context string, p Pod, registries map[string]map[string]bool) []diag.Finding {
-	return containerFindings(context, p.Namespace, "Pod", p.Name, p.Labels, p.Containers, registries)
+	return containerFindings(context, p.Namespace, "Pod", p.Name, p.OwnerChain, p.Labels, p.Containers, registries)
 }
 
 // containerFindings classifies the containers of one object with the v0.1 rule
 // selection (spec v0.1 section 2.1) and stamps the cluster location and the
 // tier 2 attributes (spec v0.2 section 3).
-func containerFindings(context, namespace, kind, name string, labels map[string]string, containers []Container, registries map[string]map[string]bool) []diag.Finding {
+func containerFindings(context, namespace, kind, name string, owners []Owner, labels map[string]string, containers []Container, registries map[string]map[string]bool) []diag.Finding {
 	chart, release := chartLabels(labels)
 	path := clusterPath(namespace, kind, name)
+	identity := workloadIdentity(namespace, kind, name, owners)
 	out := make([]diag.Finding, 0, len(containers))
 	for _, c := range sortedContainers(containers) {
 		ref := imageref.Parse(c.Image)
@@ -148,7 +155,7 @@ func containerFindings(context, namespace, kind, name string, labels map[string]
 			continue
 		}
 		attrs := append([]string{}, class.Attributes...)
-		if mirrored(registries, namespace, c.Image, ref.Registry) && !contains(attrs, "mirror") {
+		if mirrored(registries, identity, c.Name, c.Image, ref.Registry) && !contains(attrs, "mirror") {
 			attrs = append(attrs, "mirror")
 		}
 		sort.Strings(attrs)
@@ -252,17 +259,20 @@ func chartLabels(labels map[string]string) (chart, release string) {
 	return chart, release
 }
 
-// runningImageRegistries maps (namespace, template image) to the registries
-// observed in the imageID of running containers (spec v0.2 section 2, tier 1).
+// runningImageRegistries maps the workload a pod belongs to, its container and
+// its declared image to the registries observed in the imageID, so the mirror
+// attribute is scoped to the owning workload and container instead of the whole
+// namespace and image (review 03 m2, spec v0.2 section 2, tier 1).
 func runningImageRegistries(pods []Pod) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for _, p := range pods {
+		identity := workloadIdentity(p.Namespace, "Pod", p.Name, p.OwnerChain)
 		for _, status := range p.Status {
 			if status.Image == "" || status.ImageID == "" {
 				continue
 			}
 			if registry := imageIDRegistry(status.ImageID); registry != "" {
-				key := p.Namespace + "\x00" + status.Image
+				key := mirrorKey(identity, status.Name, status.Image)
 				set := out[key]
 				if set == nil {
 					set = map[string]bool{}
@@ -275,10 +285,27 @@ func runningImageRegistries(pods []Pod) map[string]map[string]bool {
 	return out
 }
 
-// mirrored reports whether a running container resolved the template image to a
-// different registry, so the mirror attribute is added (spec v0.2 section 3).
-func mirrored(registries map[string]map[string]bool, namespace, image, registry string) bool {
-	for observed := range registries[namespace+"\x00"+image] {
+// workloadIdentity keys the mirror map: the top of the controller owner chain
+// when the object has one, so a pod's imageID only marks the workload that owns
+// it, otherwise the object itself (review 03 m2, spec v0.2 section 3).
+func workloadIdentity(namespace, kind, name string, owners []Owner) string {
+	if len(owners) > 0 {
+		return namespace + "\x00" + owners[0].Kind + "\x00" + owners[0].Name
+	}
+	return namespace + "\x00" + kind + "\x00" + name
+}
+
+// mirrorKey is the mirror-map key: the workload identity, the container and the
+// declared image (review 03 m2).
+func mirrorKey(identity, container, image string) string {
+	return identity + "\x00" + container + "\x00" + image
+}
+
+// mirrored reports whether the running containers of one workload resolved a
+// template image to a different registry, so the mirror attribute is added
+// (spec v0.2 section 3).
+func mirrored(registries map[string]map[string]bool, identity, container, image, registry string) bool {
+	for observed := range registries[mirrorKey(identity, container, image)] {
 		if observed != registry {
 			return true
 		}
@@ -348,7 +375,8 @@ func dedupeCluster(in []diag.Finding) []diag.Finding {
 }
 
 // sortClusterFindings applies the cluster order: severity, impact, path,
-// container, rule, reference (spec v0.2 section 3).
+// container, rule, reference, original, resource kind, resource name (spec v0.2
+// section 3, review 03 m3).
 func sortClusterFindings(findings []diag.Finding) {
 	sort.SliceStable(findings, func(i, j int) bool {
 		a, b := findings[i], findings[j]
@@ -367,7 +395,18 @@ func sortClusterFindings(findings []diag.Finding) {
 		if a.RuleID != b.RuleID {
 			return a.RuleID < b.RuleID
 		}
-		return a.Reference < b.Reference
+		if a.Reference != b.Reference {
+			return a.Reference < b.Reference
+		}
+		// Original, then the resource kind and name, fully order equal keys
+		// (review 03 m3).
+		if a.Original != b.Original {
+			return a.Original < b.Original
+		}
+		if resourceKind(a) != resourceKind(b) {
+			return resourceKind(a) < resourceKind(b)
+		}
+		return resourceName(a) < resourceName(b)
 	})
 }
 
@@ -376,6 +415,20 @@ func container(f diag.Finding) string {
 		return ""
 	}
 	return f.Resource.Container
+}
+
+func resourceKind(f diag.Finding) string {
+	if f.Resource == nil {
+		return ""
+	}
+	return f.Resource.Kind
+}
+
+func resourceName(f diag.Finding) string {
+	if f.Resource == nil {
+		return ""
+	}
+	return f.Resource.Name
 }
 
 // assignFingerprints numbers occurrences in sorted order and hashes them, using

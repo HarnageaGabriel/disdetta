@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,16 +15,16 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// listOptions returns the Limit and LabelSelector of a list action, whichever
-// concrete action type client-go uses.
-func listOptions(action k8stesting.Action) (int64, string, string, bool) {
+// listOptions returns the Limit, LabelSelector, FieldSelector and Continue of a
+// list action, whichever concrete action type client-go uses.
+func listOptions(action k8stesting.Action) (int64, string, string, string, bool) {
 	switch a := action.(type) {
 	case k8stesting.ListActionImpl:
-		return a.ListOptions.Limit, a.ListOptions.LabelSelector, a.ListOptions.Continue, true
+		return a.ListOptions.Limit, a.ListOptions.LabelSelector, a.ListOptions.FieldSelector, a.ListOptions.Continue, true
 	case *k8stesting.ListActionImpl:
-		return a.ListOptions.Limit, a.ListOptions.LabelSelector, a.ListOptions.Continue, true
+		return a.ListOptions.Limit, a.ListOptions.LabelSelector, a.ListOptions.FieldSelector, a.ListOptions.Continue, true
 	}
-	return 0, "", "", false
+	return 0, "", "", "", false
 }
 
 // TestClientSourceReadOnly asserts the source issues only get and list verbs
@@ -55,36 +56,39 @@ func TestClientSourceReadOnly(t *testing.T) {
 }
 
 // TestClientSourceListOptions asserts every list uses the page size of spec
-// v0.2 section 4 and that release Secrets are selected by owner=helm.
+// v0.2 section 4, and that release Secrets use the smaller tier 3 page with both
+// server-side selectors (review 03 M1).
 func TestClientSourceListOptions(t *testing.T) {
 	source, client := newSource(t, recordedObjects(t)...)
-	var limits []int64
-	secretSelector := ""
+	lists := 0
+	secretSelector, secretFieldSelector := "", ""
 	client.PrependReactor("list", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		limit, selector, _, ok := listOptions(action)
+		limit, selector, fieldSelector, _, ok := listOptions(action)
 		if !ok {
 			t.Errorf("source docs/spec/v0.2-cluster.md section 4: no list options on %T", action)
 			return false, nil, nil
 		}
-		limits = append(limits, limit)
+		lists++
 		if action.GetResource().Resource == "secrets" {
-			secretSelector = selector
+			secretSelector, secretFieldSelector = selector, fieldSelector
+			if limit != releaseListLimit {
+				t.Errorf("review 03 M1: secret list limit %d want %d", limit, releaseListLimit)
+			}
+			return false, nil, nil
+		}
+		if limit != ListLimit {
+			t.Errorf("source docs/spec/v0.2-cluster.md section 4: list limit %d want %d", limit, ListLimit)
 		}
 		return false, nil, nil
 	})
 	ctx := context.Background()
 	source.ListWorkloads(ctx, nil)
 	source.ListReleases(ctx, nil)
-	if len(limits) == 0 {
+	if lists == 0 {
 		t.Fatalf("source docs/spec/v0.2-cluster.md section 4: no lists issued")
 	}
-	for _, limit := range limits {
-		if limit != ListLimit {
-			t.Fatalf("source docs/spec/v0.2-cluster.md section 4: list limit %d want %d", limit, ListLimit)
-		}
-	}
-	if secretSelector != "owner=helm" {
-		t.Fatalf("source docs/spec/v0.2-cluster.md section 2 tier 3: secret selector %q", secretSelector)
+	if secretSelector != helmReleaseLabelSelector || secretFieldSelector != helmReleaseFieldSelector {
+		t.Fatalf("review 03 M1: secret selectors %q %q", secretSelector, secretFieldSelector)
 	}
 }
 
@@ -97,7 +101,7 @@ func TestClientSourcePagination(t *testing.T) {
 	var continues []string
 	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		calls++
-		limit, _, cont, _ := listOptions(action)
+		limit, _, _, cont, _ := listOptions(action)
 		limits = append(limits, limit)
 		continues = append(continues, cont)
 		list := &corev1.PodList{}
@@ -211,5 +215,133 @@ func TestClientSourceForbidden(t *testing.T) {
 	}
 	if len(workloads.Templates) == 0 {
 		t.Fatalf("source docs/spec/v0.2-cluster.md section 4: scan did not continue after a forbidden list")
+	}
+}
+
+// TestClientSourceOwnerChain checks review 03 m2: a Pod's controller owner chain
+// is resolved through the listed ReplicaSet to the Deployment that owns it, so
+// the mirror attribute can be scoped to the owning workload.
+func TestClientSourceOwnerChain(t *testing.T) {
+	source, _ := newSource(t, recordedObjects(t)...)
+	workloads, failures := source.ListWorkloads(context.Background(), nil)
+	if len(failures) != 0 {
+		t.Fatalf("review 03 m2: failures %#v", failures)
+	}
+	want := []Owner{{Kind: "Deployment", Name: "web"}, {Kind: "ReplicaSet", Name: "web-7d9c"}}
+	for _, p := range workloads.Pods {
+		if p.Namespace != "shop" || p.Name != "web-abc123" {
+			continue
+		}
+		if len(p.OwnerChain) != len(want) {
+			t.Fatalf("review 03 m2: owner chain %#v want %#v", p.OwnerChain, want)
+		}
+		for i := range want {
+			if p.OwnerChain[i] != want[i] {
+				t.Fatalf("review 03 m2: owner chain %#v want %#v", p.OwnerChain, want)
+			}
+		}
+		return
+	}
+	t.Fatalf("review 03 m2: pod shop/web-abc123 not found")
+}
+
+// TestClientSourceReleaseSecretFilters checks review 03 M1 and m6: the tier 3
+// list sends the deployed-Helm label selector and the release-type field
+// selector, keeps the highest numeric deployed revision, and never decodes a
+// non-Helm Secret that carries owner=helm.
+func TestClientSourceReleaseSecretFilters(t *testing.T) {
+	helmRelease := func(name, version string, payload []byte) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "db", Labels: map[string]string{
+				"owner": "helm", "name": "pg", "version": version, "status": "deployed",
+			}},
+			Type: corev1.SecretType(helmReleaseSecretType),
+			Data: map[string][]byte{"release": payload},
+		}
+	}
+	v9 := releasePayload(t, `{"chart":{"metadata":{"name":"pg","version":"9.0.0"}}}`)
+	v10 := releasePayload(t, `{"chart":{"metadata":{"name":"pg","version":"10.0.0"}}}`)
+	opaque := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "sh.helm.release.v1.pg.v99", Namespace: "db", Labels: map[string]string{
+			"owner": "helm", "name": "pg", "version": "99", "status": "deployed",
+		}},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{"release": []byte("!!!not-base64!!!")},
+	}
+	source, client := newSource(t,
+		helmRelease("sh.helm.release.v1.pg.v9", "9", v9),
+		helmRelease("sh.helm.release.v1.pg.v10", "10", v10),
+		opaque,
+	)
+	var label, field string
+	client.PrependReactor("list", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		_, label, field, _, _ = listOptions(action)
+		return false, nil, nil
+	})
+	releases, failures := source.ListReleases(context.Background(), nil)
+	if len(failures) != 0 {
+		t.Fatalf("review 03 M1: failures %#v", failures)
+	}
+	if label != helmReleaseLabelSelector || field != helmReleaseFieldSelector {
+		t.Fatalf("review 03 M1: selectors %q %q", label, field)
+	}
+	if len(releases) != 1 || releases[0].Name != "pg" || !bytes.Equal(releases[0].Payload, v10) {
+		t.Fatalf("review 03 M1: highest deployed revision not selected: %#v", releases)
+	}
+	// The Opaque Secret carries an undecodable payload: decoding it would report
+	// DSD-SCN-009, so its absence proves it is never decoded (review 03 m6).
+	got, err := Scan(context.Background(), source, Options{ReadHelmSecrets: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range got.Diagnostics {
+		if d.Code == "DSD-SCN-009" {
+			t.Fatalf("review 03 m6: a non-Helm Secret was decoded: %#v", d)
+		}
+	}
+}
+
+// TestClientSourceListTimeoutBoundsWholeList checks review 03 m8: the timeout
+// bounds the whole paginated list, so a server that keeps returning a
+// continuation token cannot extend the read page after page.
+func TestClientSourceListTimeoutBoundsWholeList(t *testing.T) {
+	source, client := newSource(t)
+	source.timeout = 150 * time.Millisecond
+	calls := 0
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		time.Sleep(30 * time.Millisecond)
+		return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "next"}}, nil
+	})
+	start := time.Now()
+	_, failures := source.ListWorkloads(context.Background(), []string{"db"})
+	elapsed := time.Since(start)
+	if calls == 0 || calls > 20 || elapsed > 5*time.Second {
+		t.Fatalf("review 03 m8: paging did not stop on the whole-list timeout: calls=%d elapsed=%s", calls, elapsed)
+	}
+	if len(failures) != 1 || failures[0].Forbidden || failures[0].Resource != "pods" || failures[0].Tier != 1 {
+		t.Fatalf("review 03 m8: failures %#v", failures)
+	}
+}
+
+// TestClientSourceListStopsOnCancellation checks review 03 m8: paging stops as
+// soon as the parent context is done instead of issuing another page.
+func TestClientSourceListStopsOnCancellation(t *testing.T) {
+	source, client := newSource(t)
+	source.timeout = time.Minute
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		cancel()
+		return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "next"}}, nil
+	})
+	_, failures := source.ListWorkloads(ctx, []string{"db"})
+	if calls != 1 {
+		t.Fatalf("review 03 m8: paging continued after cancellation: calls=%d", calls)
+	}
+	if len(failures) != 1 || failures[0].Resource != "pods" {
+		t.Fatalf("review 03 m8: failures %#v", failures)
 	}
 }

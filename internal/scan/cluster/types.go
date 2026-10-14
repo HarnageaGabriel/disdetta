@@ -37,7 +37,9 @@ type Workload struct {
 
 // Pod is one Pod object (spec v0.2 section 2, tier 1). Owned is true when the
 // pod has a controller owner, in which case it is not a template source but its
-// running imageIDs still feed the mirror attribute.
+// running imageIDs still feed the mirror attribute. OwnerChain is the pod's
+// controller owner chain, outermost first, resolved from the objects of the same
+// read so the mirror attribute is scoped to the owning workload (review 03 m2).
 type Pod struct {
 	Namespace  string
 	Name       string
@@ -45,6 +47,7 @@ type Pod struct {
 	Containers []Container
 	Status     []ContainerStatus
 	Owned      bool
+	OwnerChain []Owner
 }
 
 // ContainerStatus is one running status.containerStatuses entry of a Pod

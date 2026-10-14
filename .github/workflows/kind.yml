@@ -21,19 +21,25 @@ jobs:
           go-version: stable
           cache: true
       - name: Install kind
-        # VERIFY: pinned for reproducible CI; update deliberately.
+        # VERIFY: pinned for reproducible CI; update deliberately. The download
+        # is checked against the sha256 published by the same release.
         run: |
-          curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
+          curl -fsSL -o ./kind.sha256 https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64.sha256
+          echo "$(awk '{print $1}' ./kind.sha256)  ./kind" | sha256sum -c -
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
           kind version
       - name: Install helm
-        # VERIFY: pinned for reproducible CI; update deliberately.
+        # VERIFY: pinned for reproducible CI; update deliberately. The download
+        # is checked against the sha256 published by the same release.
         run: |
           curl -fsSL -o helm.tar.gz https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz
+          curl -fsSL -o helm.tar.gz.sha256 https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz.sha256
+          echo "$(awk '{print $1}' helm.tar.gz.sha256)  helm.tar.gz" | sha256sum -c -
           tar -xzf helm.tar.gz
           sudo mv linux-amd64/helm /usr/local/bin/helm
-          rm -rf linux-amd64 helm.tar.gz
+          rm -rf linux-amd64 helm.tar.gz helm.tar.gz.sha256
           helm version
       - name: Run the cluster scan kind test
         run: bash test/kind/run.sh

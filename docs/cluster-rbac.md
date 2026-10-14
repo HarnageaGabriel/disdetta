@@ -2,9 +2,8 @@
 
 `disdetta scan --cluster` reads a cluster with two least-privilege roles
 (spec [v0.2](spec/v0.2-cluster.md) section 4). The scan only ever issues
-`list` calls (the only read verb it needs); `get` is listed alongside `list` so
-the role also works if a future build fetches a single object by name. Nothing
-in the scan writes.
+`list` calls, so the roles grant only `list` (review 03 m9); nothing in the scan
+writes, and no build fetches a single object by name.
 
 - **Tiers 1-2** read pod templates and Pod status, so they need `list` on the
   workload kinds and Pods in every namespace you scan.
@@ -22,13 +21,13 @@ metadata:
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
 ```
 
 Bind it to the identity the scan runs as. A ClusterRoleBinding grants the read
@@ -63,7 +62,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
 ```
 
 ### Risk: RBAC cannot restrict by Secret type

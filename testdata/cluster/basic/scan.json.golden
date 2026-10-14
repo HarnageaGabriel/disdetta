@@ -61,7 +61,6 @@
       "reference": "docker.io/bitnami/redis:7.2.4",
       "original": "bitnami/redis:7.2.4",
       "attributes": [
-        "mirror",
         "pull-risk"
       ],
       "fingerprint": "689bce2c0ad6a30f",

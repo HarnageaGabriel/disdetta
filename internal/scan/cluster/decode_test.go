@@ -115,3 +115,22 @@ func TestDecodeReleasePayloadCaps(t *testing.T) {
 		}
 	})
 }
+
+// TestDecodeReleasePayloadRejectsLongEncoding checks review 03 m1: an input
+// longer than the base64 encoding of the compressed cap is rejected before it is
+// decoded, even when it would fail base64 decoding anyway and after trimming
+// surrounding whitespace.
+func TestDecodeReleasePayloadRejectsLongEncoding(t *testing.T) {
+	tooLong := bytes.Repeat([]byte("A"), base64.StdEncoding.EncodedLen(MaxReleasePayloadSize)+1)
+	cases := map[string][]byte{
+		"no padding": tooLong,
+		"surrounded": append(append([]byte("\n  "), tooLong...), '\n'),
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeReleasePayload(in); !errors.Is(err, ErrReleasePayloadTooLarge) {
+				t.Fatalf("review 03 m1: err %v", err)
+			}
+		})
+	}
+}

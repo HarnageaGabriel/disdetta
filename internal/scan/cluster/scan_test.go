@@ -169,7 +169,8 @@ func TestScanTier3Bounds(t *testing.T) {
 
 // TestScanForbiddenTiers checks DSD-SCN-010: a forbidden tier 1-2 list is a
 // warning that marks the report incomplete, a forbidden tier 3 list is a warning
-// only, and any other API error is an error (spec v0.2 sections 4 and 5).
+// that also marks a requested scan incomplete (review 03 M2), and any other API
+// error is an error (spec v0.2 sections 4 and 5).
 func TestScanForbiddenTiers(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -179,7 +180,9 @@ func TestScanForbiddenTiers(t *testing.T) {
 		wantComplete bool
 	}{
 		{"tier 1 forbidden", &fakeSource{workloadFailures: []ListFailure{{Tier: 1, Resource: "deployments", Namespace: "db", Forbidden: true}}}, Options{}, diag.LevelWarning, false},
-		{"tier 3 forbidden", &fakeSource{releaseFailures: []ListFailure{{Tier: 3, Resource: "secrets", Forbidden: true}}}, Options{ReadHelmSecrets: true}, diag.LevelWarning, true},
+		// review 03 M2: a requested tier 3 list that RBAC forbids is incomplete.
+		{"tier 3 forbidden", &fakeSource{releaseFailures: []ListFailure{{Tier: 3, Resource: "secrets", Forbidden: true}}}, Options{ReadHelmSecrets: true}, diag.LevelWarning, false},
+		{"tier 3 error", &fakeSource{releaseFailures: []ListFailure{{Tier: 3, Resource: "secrets", Namespace: "db"}}}, Options{ReadHelmSecrets: true}, diag.LevelError, false},
 		{"api error", &fakeSource{workloadFailures: []ListFailure{{Tier: 1, Resource: "pods", Namespace: "db"}}}, Options{}, diag.LevelError, false},
 	}
 	for _, tt := range tests {
@@ -274,5 +277,84 @@ func TestScanHelmSecretsOff(t *testing.T) {
 	}
 	if len(findingsFor(got, "DSD-CFG-001")) != 0 || got.Summary.Releases != 0 || len(got.Groups) != 0 {
 		t.Errorf("source docs/spec/v0.2-cluster.md section 2 tier 3: tier 3 leaked: %#v", got)
+	}
+}
+
+// TestScanMirrorScopedToWorkload checks review 03 m2: the mirror attribute from
+// an imageID is scoped to the workload that owns the pod and to the container,
+// not to the whole namespace and image (spec v0.2 section 3).
+func TestScanMirrorScopedToWorkload(t *testing.T) {
+	image := "bitnami/redis:7.2.4"
+	source := &fakeSource{workloads: Workloads{
+		Templates: []Workload{
+			{Namespace: "db", Kind: "Deployment", Name: "cache", Containers: []Container{
+				{Name: "redis", Image: image},
+				{Name: "sidecar", Image: image},
+			}},
+			{Namespace: "db", Kind: "Deployment", Name: "other", Containers: []Container{{Name: "redis", Image: image}}},
+		},
+		Pods: []Pod{{
+			Namespace: "db", Name: "cache-abc", Owned: true,
+			OwnerChain: []Owner{{Kind: "Deployment", Name: "cache"}},
+			Containers: []Container{{Name: "redis", Image: image}},
+			Status:     []ContainerStatus{{Name: "redis", Image: image, ImageID: "mycache.example.com/bitnami/redis@sha256:aaaa"}},
+		}},
+	}}
+	got, err := Scan(context.Background(), source, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirrored := map[string]bool{}
+	for _, f := range got.Findings {
+		if f.Resource == nil {
+			continue
+		}
+		for _, attr := range f.Attributes {
+			if attr == "mirror" {
+				mirrored[f.Resource.Name+"/"+f.Resource.Container] = true
+			}
+		}
+	}
+	if !mirrored["cache/redis"] {
+		t.Errorf("review 03 m2: missing mirror on the owning workload: %#v", got.Findings)
+	}
+	if mirrored["cache/sidecar"] {
+		t.Errorf("review 03 m2: mirror leaked to another container of the same workload")
+	}
+	if mirrored["other/redis"] {
+		t.Errorf("review 03 m2: mirror leaked to another workload with the same image")
+	}
+}
+
+// TestSortClusterFindingsTieBreak checks review 03 m3: equal sort keys are fully
+// ordered by original, then resource kind and name, so output is deterministic.
+func TestSortClusterFindingsTieBreak(t *testing.T) {
+	base := diag.Finding{
+		RuleID:    "DSD-IMG-002",
+		Severity:  diag.SeverityHigh,
+		Impact:    diag.ImpactHigh,
+		Location:  diag.Location{Path: "cluster/db/Pod/x"},
+		Reference: "docker.io/bitnami/redis:7.2.4",
+		Resource:  &diag.Resource{Kind: "Pod", Name: "x", Container: "redis"},
+	}
+	pod := base
+	pod.Original = "a/redis:7.2.4"
+	job := base
+	job.Original = "a/redis:7.2.4"
+	job.Resource = &diag.Resource{Kind: "Job", Name: "a", Container: "redis"}
+	deployment := base
+	deployment.Original = "a/redis:7.2.4"
+	deployment.Resource = &diag.Resource{Kind: "Deployment", Name: "z", Container: "redis"}
+	other := base
+	other.Original = "b/redis:7.2.4"
+
+	in := []diag.Finding{other, job, pod, deployment}
+	sortClusterFindings(in)
+	kinds := []string{in[0].Resource.Kind, in[1].Resource.Kind, in[2].Resource.Kind}
+	if kinds[0] != "Deployment" || kinds[1] != "Job" || kinds[2] != "Pod" {
+		t.Fatalf("review 03 m3: resource order %#v", kinds)
+	}
+	if in[3].Original != "b/redis:7.2.4" {
+		t.Fatalf("review 03 m3: original order %#v", []string{in[0].Original, in[1].Original, in[2].Original, in[3].Original})
 	}
 }
