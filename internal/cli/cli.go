@@ -46,7 +46,7 @@ func NewRootCmd(streams IO) *cobra.Command {
 	root := &cobra.Command{Use: "disdetta", Short: "Find Bitnami dependencies before migration", Args: cobra.NoArgs, SilenceUsage: true, SilenceErrors: true}
 	root.SetOut(streams.Out)
 	root.SetErr(streams.Err)
-	root.AddCommand(newVersionCmd(streams), newScanCmd(streams), newPlanCmd(streams))
+	root.AddCommand(newVersionCmd(streams), newScanCmd(streams), newRulesCmd(streams), newPlanCmd(streams))
 	return root
 }
 func newVersionCmd(streams IO) *cobra.Command {
@@ -73,8 +73,8 @@ func newScanCmd(streams IO) *cobra.Command {
 	var readHelmSecrets bool
 	var timeout time.Duration
 	cmd := &cobra.Command{Use: "scan [path]", Short: "Find Bitnami references in a repository or a cluster", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if format != "table" && format != "json" {
-			return &exitError{ExitError, fmt.Errorf("invalid --format %q (want table or json)", format)}
+		if format != "table" && format != "json" && format != "sarif" {
+			return &exitError{ExitError, fmt.Errorf("invalid --format %q (want table, json, or sarif)", format)}
 		}
 		threshold, ok := parseThreshold(failOn)
 		if !ok {
@@ -125,9 +125,12 @@ func newScanCmd(streams IO) *cobra.Command {
 			result.Findings = filtered
 			recount(&result)
 		}
-		if format == "json" {
+		switch format {
+		case "json":
 			scanErr = report.JSON(streams.Out, result)
-		} else {
+		case "sarif":
+			scanErr = report.SARIF(streams.Out, result)
+		default:
 			scanErr = report.Table(streams.Out, result)
 		}
 		if scanErr != nil {
@@ -143,7 +146,7 @@ func newScanCmd(streams IO) *cobra.Command {
 		}
 		return nil
 	}}
-	cmd.Flags().StringVar(&format, "format", "table", "output format: table or json")
+	cmd.Flags().StringVar(&format, "format", "table", "output format: table, json, or sarif")
 	cmd.Flags().StringVar(&failOn, "fail-on", "low", "failure threshold: high, medium, low, or none")
 	cmd.Flags().StringArrayVar(&rules, "rule", nil, "include finding rule ID (repeatable)")
 	cmd.Flags().StringArrayVar(&exclude, "exclude", nil, "skip paths matching a slash-separated glob relative to the root (repeatable, ** supported)")
@@ -154,6 +157,31 @@ func newScanCmd(streams IO) *cobra.Command {
 	cmd.Flags().StringArrayVar(&namespaces, "namespace", nil, "namespace to scan with --cluster (repeatable; default all namespaces)")
 	cmd.Flags().BoolVar(&readHelmSecrets, "read-helm-secrets", false, "read Helm release Secrets for tier 3 (may contain credentials)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "per-list timeout for --cluster (e.g. 30s)")
+	return cmd
+}
+func newRulesCmd(streams IO) *cobra.Command {
+	format := "table"
+	cmd := &cobra.Command{
+		Use:   "rules",
+		Short: "List registered finding rules and diagnostics",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			var err error
+			switch format {
+			case "table":
+				err = report.RulesTable(streams.Out)
+			case "json":
+				err = report.RulesJSON(streams.Out)
+			default:
+				return &exitError{ExitError, fmt.Errorf("invalid --format %q (want table or json)", format)}
+			}
+			if err != nil {
+				return &exitError{ExitError, fmt.Errorf("write rules: %w", err)}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "table", "output format: table or json")
 	return cmd
 }
 func parseThreshold(v string) (int, bool) {

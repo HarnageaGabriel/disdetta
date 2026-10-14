@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -40,4 +41,64 @@ func write(t *testing.T, data string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func TestSARIFAndRulesCLI(t *testing.T) {
+	fixture := filepath.Join("..", "..", "testdata", "repos", "helm")
+	var sarif, sarifErr bytes.Buffer
+	exit := Execute(context.Background(), []string{"scan", fixture, "--format", "sarif", "--fail-on", "none"}, IO{Out: &sarif, Err: &sarifErr})
+	if exit != ExitOK || !bytes.HasPrefix(sarif.Bytes(), []byte("{\n  \"version\": \"2.1.0\"")) {
+		t.Fatalf("sarif exit=%d stderr=%s output=%s", exit, sarifErr.String(), sarif.String())
+	}
+	golden, err := os.ReadFile(filepath.Join(fixture, "scan.sarif.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(sarif.Bytes(), golden) {
+		n := len(sarif.Bytes())
+		if len(golden) < n {
+			n = len(golden)
+		}
+		for i := 0; i < n; i++ {
+			if sarif.Bytes()[i] != golden[i] {
+				t.Fatalf("SARIF differs at %d: got %q want %q lens %d/%d", i, sarif.Bytes()[i], golden[i], len(sarif.Bytes()), len(golden))
+			}
+		}
+		t.Fatalf("SARIF differs lens %d/%d", len(sarif.Bytes()), len(golden))
+	}
+
+	var table, jsonOut, ruleErr bytes.Buffer
+	if exit := Execute(context.Background(), []string{"rules"}, IO{Out: &table, Err: &ruleErr}); exit != ExitOK {
+		t.Fatalf("rules table exit=%d stderr=%s", exit, ruleErr.String())
+	}
+	wantTable, err := os.ReadFile(filepath.Join("..", "..", "testdata", "rules.table.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(table.Bytes(), wantTable) {
+		t.Fatal("rules table differs from golden")
+	}
+	if exit := Execute(context.Background(), []string{"rules", "--format", "json"}, IO{Out: &jsonOut, Err: &ruleErr}); exit != ExitOK {
+		t.Fatalf("rules json exit=%d stderr=%s", exit, ruleErr.String())
+	}
+	wantJSON, err := os.ReadFile(filepath.Join("..", "..", "testdata", "rules.json.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(jsonOut.Bytes(), wantJSON) {
+		t.Fatal("rules JSON differs from golden")
+	}
+	for _, code := range []string{"DSD-CFG-001", "DSD-IMG-001", "DSD-IMG-002", "DSD-IMG-003", "DSD-IMG-004", "DSD-CHT-001", "DSD-CHT-002", "DSD-SCN-001", "DSD-SCN-010"} {
+		if !bytes.Contains(table.Bytes(), []byte(code)) {
+			t.Errorf("rules table missing %s", code)
+		}
+	}
+}
+
+func TestPlanRejectsSARIF(t *testing.T) {
+	var out, stderr bytes.Buffer
+	exit := Execute(context.Background(), []string{"plan", "--release", "pg", "--from-repo", ".", "--format", "sarif"}, IO{Out: &out, Err: &stderr})
+	if exit != ExitError || !strings.Contains(stderr.String(), "want table or json") {
+		t.Fatalf("exit=%d stderr=%s", exit, stderr.String())
+	}
 }
