@@ -21,17 +21,17 @@ jobs:
           go-version: stable
           cache: true
       - name: Install kind
-        # VERIFY: pinned for reproducible CI; update deliberately. The download
+        # Pinned for reproducible CI (verified 2026-10-14); update deliberately. The download
         # is checked against the sha256 published by the same release.
         run: |
-          curl -fsSL -o ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
-          curl -fsSL -o ./kind.sha256 https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64.sha256
+          curl -fsSL -o ./kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          curl -fsSL -o ./kind.sha256 https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64.sha256sum
           echo "$(awk '{print $1}' ./kind.sha256)  ./kind" | sha256sum -c -
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
           kind version
       - name: Install helm
-        # VERIFY: pinned for reproducible CI; update deliberately. The download
+        # Pinned for reproducible CI (verified 2026-10-14); update deliberately. The download
         # is checked against the sha256 published by the same release.
         run: |
           curl -fsSL -o helm.tar.gz https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz
