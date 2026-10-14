@@ -36,9 +36,9 @@ still depend on, and plans the way out, one component at a time. It reads; it
 never changes anything.
 
 > [!WARNING]
-> **Pre-alpha.** Only `scan` on repositories exists today. `scan` on a cluster
-> and `plan` are not implemented yet; see [Status](#status). Interfaces will
-> change.
+> **Pre-alpha.** `scan` (repositories and clusters) works; `plan` covers
+> PostgreSQL only, with partial mappings. See [Status](#status). Interfaces may
+> change before v0.1.0.
 
 ## Try it now (Prova subito)
 
@@ -107,10 +107,10 @@ exists today.
 
 | Capability | State |
 | --- | --- |
-| `scan` on repositories (values, `Chart.yaml`, Flux, Argo CD, Dockerfile, GitHub Actions) | Implemented, partial coverage ([#roadmap](#roadmap)) |
-| `scan` on clusters (Pods, Helm releases) | Planned |
-| Catalog of exit routes (data, each entry with a source) | Planned |
-| `plan <release>` (PostgreSQL, Redis, Kafka, MongoDB, Keycloak) | Planned |
+| `scan` on repositories (Helm values and templates, `Chart.yaml`, Flux, Argo CD, Kustomize, compose, GitHub Actions, GitLab CI, Azure Pipelines, Dockerfile) | Implemented; recall measured on a [public corpus](docs/corpus.md) |
+| `scan --cluster` (workloads, Helm releases, opt-in release Secrets) | Implemented, tested on kind |
+| Catalog of exit routes (data, each entry with a source) | PostgreSQL -> CloudNativePG (`partial`) |
+| `plan` ([docs](docs/usage/plan.md)) | PostgreSQL; Redis, Kafka, MongoDB, Keycloak need research (issues #3-#6) |
 | SARIF output, GoReleaser, Homebrew, krew | Planned |
 
 ## How it works

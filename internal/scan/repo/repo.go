@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/detect"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -69,51 +68,27 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 		return r, nil
 	}
 	var out diag.Report
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			if path == root {
-				return walkErr
-			}
-			rel, e := filepath.Rel(root, path)
-			if e != nil {
-				return e
-			}
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, filepath.ToSlash(rel), "path could not be read"))
+	err = walkRepository(ctx, root, func(entry repositoryEntry) error {
+		if excluded(entry.display, options.Exclude) {
 			return nil
 		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			if path != root && skippedDirectories[entry.Name()] {
-				return filepath.SkipDir
-			}
+		switch entry.problem {
+		case walkPathUnreadable:
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "path could not be read"))
 			return nil
-		}
-		rel, e := filepath.Rel(root, path)
-		if e != nil {
-			return e
-		}
-		display := filepath.ToSlash(rel)
-		if excluded(display, options.Exclude) {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
+		case walkSymlink:
 			out.Summary.FilesSkipped++
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "symbolic link skipped"))
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "symbolic link skipped"))
 			return nil
-		}
-		entryInfo, e := entry.Info()
-		if e != nil {
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file metadata could not be read"))
+		case walkMetadataUnreadable:
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "file metadata could not be read"))
 			return nil
-		}
-		if !entryInfo.Mode().IsRegular() {
+		case walkNonRegular:
 			out.Summary.FilesSkipped++
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "non-regular file skipped"))
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "non-regular file skipped"))
 			return nil
 		}
-		appendReport(&out, scanFile(path, display, entryInfo))
+		appendReport(&out, scanFile(entry.path, entry.display, entry.info))
 		return nil
 	})
 	if err != nil {
@@ -156,41 +131,19 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	if !yamlFile && !dockerfile && !templateText {
 		return out
 	}
-	if info.Size() > MaxFileSize {
+	data, err := readRegularFile(path, info)
+	if errors.Is(err, ErrFileTooLarge) {
 		out.Summary.FilesSkipped++
 		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-008", diag.LevelError, display, "file exceeds 16 MiB limit; skipped")}
 		return out
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file could not be read")}
-		return out
-	}
-	readOK := false
-	defer func() {
-		if e := file.Close(); e != nil && readOK {
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file could not be closed"))
-		}
-	}()
-	opened, e := file.Stat()
-	if e != nil {
-		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file metadata could not be read")}
-		return out
-	}
-	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+	if errors.Is(err, ErrUnsafeFile) {
 		out.Summary.FilesSkipped++
 		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "file changed or became non-regular; skipped")}
 		return out
 	}
-	data, e := io.ReadAll(io.LimitReader(file, MaxFileSize+1))
-	if e != nil {
+	if err != nil {
 		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file could not be read")}
-		return out
-	}
-	readOK = true
-	if len(data) > MaxFileSize {
-		out.Summary.FilesSkipped++
-		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-008", diag.LevelError, display, "file exceeds 16 MiB limit; skipped")}
 		return out
 	}
 	out.Summary.FilesScanned = 1

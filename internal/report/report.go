@@ -20,7 +20,7 @@ func Table(w io.Writer, r diag.Report) error {
 	}
 	for _, f := range r.Findings {
 		cells := []string{location(f.Location), f.RuleID, string(f.Severity), string(f.Confidence), string(f.Impact), f.Reference}
-		if _, e := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", safeCell(cells[0]), safeCell(cells[1]), safeCell(cells[2]), safeCell(cells[3]), safeCell(cells[4]), safeCell(cells[5])); e != nil {
+		if _, e := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", SafeText(cells[0]), SafeText(cells[1]), SafeText(cells[2]), SafeText(cells[3]), SafeText(cells[4]), SafeText(cells[5])); e != nil {
 			return e
 		}
 	}
@@ -29,7 +29,7 @@ func Table(w io.Writer, r diag.Report) error {
 			continue
 		}
 		cells := []string{location(d.Location), d.Code, string(d.Level), "-", "-", d.Message}
-		if _, e := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", safeCell(cells[0]), safeCell(cells[1]), safeCell(cells[2]), cells[3], cells[4], safeCell(cells[5])); e != nil {
+		if _, e := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", SafeText(cells[0]), SafeText(cells[1]), SafeText(cells[2]), cells[3], cells[4], SafeText(cells[5])); e != nil {
 			return e
 		}
 	}
@@ -84,7 +84,7 @@ func location(v diag.Location) string {
 // safeCell escapes a table cell so no raw control character or Unicode format
 // character (category Cf) can forge a row, and an invalid UTF-8 byte is
 // escaped rather than replaced (spec section 6).
-func safeCell(v string) string {
+func SafeText(v string) string {
 	var b strings.Builder
 	for i := 0; i < len(v); {
 		r, size := utf8.DecodeRuneInString(v[i:])

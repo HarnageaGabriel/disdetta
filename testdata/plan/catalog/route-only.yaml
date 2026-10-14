@@ -1,0 +1,15 @@
+schemaVersion: "1"
+chart: fake
+appliesTo: ">=1.0.0"
+maturity: route-only
+routes:
+  - id: target
+    target: {name: Fake, kind: Fake, apiVersion: example.test/v1, version: "1"}
+    recommended: true
+    migration: side-by-side
+    source: {url: https://example.test/route, verified: 2026-10-14}
+mappings: []
+checklist:
+  - id: review
+    text: Review manually.
+    source: {url: https://example.test/review}

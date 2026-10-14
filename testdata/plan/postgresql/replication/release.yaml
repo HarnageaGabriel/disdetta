@@ -1,0 +1,18 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pg
+spec:
+  chart:
+    spec:
+      chart: postgresql
+      version: 16.7.4
+  values:
+    architecture: replication
+    readReplicas:
+      replicaCount: 2
+    primary:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi

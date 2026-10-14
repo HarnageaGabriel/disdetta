@@ -1,0 +1,45 @@
+schemaVersion: "1"
+chart: postgresql
+appliesTo: ">=16.0.0 <18.0.0"
+maturity: partial
+routes:
+  - id: cloudnative-pg
+    target:
+      name: CloudNativePG
+      kind: Cluster
+      apiVersion: postgresql.cnpg.io/v1
+      version: "1.30"
+    recommended: true
+    migration: side-by-side
+    source:
+      url: https://cloudnative-pg.io/docs/1.30/database_import
+      verified: 2026-10-14
+mappings:
+  - {from: architecture, to: spec.instances, kind: transform, accepts: "enum:standalone|replication", transform: instances-from-architecture, source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}, note: "CNPG instances include the primary; replication changes failover behavior."}
+  - {from: primary.persistence.size, to: spec.storage.size, kind: rename, accepts: quantity, source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}, note: "Size cannot be decreased in CloudNativePG."}
+  - {from: primary.persistence.storageClass, to: spec.storage.storageClass, kind: rename, accepts: dns-label, source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: primary.resources, to: spec.resources, kind: rename, accepts: resources, source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: auth.database, to: spec.bootstrap.initdb.database, kind: rename, accepts: pg-identifier, source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: auth.username, to: spec.bootstrap.initdb.owner, kind: rename, accepts: pg-identifier, source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: primary.configuration, to: spec.postgresql.parameters, kind: transform, transform: parse-postgresql-conf, source: {url: https://cloudnative-pg.io/docs/1.30/postgresql_conf, verified: 2026-10-14}}
+  - {from: primary.extendedConfiguration, to: spec.postgresql.parameters, kind: transform, transform: parse-postgresql-conf, source: {url: https://cloudnative-pg.io/docs/1.30/postgresql_conf, verified: 2026-10-14}}
+  - {from: primary.pgHbaConfiguration, to: spec.postgresql.pg_hba, kind: transform, transform: split-lines, source: {url: https://cloudnative-pg.io/docs/1.30/postgresql_conf, verified: 2026-10-14}, note: "CloudNativePG appends these rules after its fixed rules."}
+  - {from: postgresqlSharedPreloadLibraries, to: spec.postgresql.shared_preload_libraries, kind: transform, transform: split-comma, source: {url: https://cloudnative-pg.io/docs/1.30/postgresql_conf, verified: 2026-10-14}}
+  - {from: auth.existingSecret, kind: manual, note: "Create a CNPG basic-auth Secret; the Bitnami Secret layout differs.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: auth.enablePostgresUser, kind: manual, note: "Configure superuser access and its Secret explicitly; CNPG defaults it off.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: auth.postgresPassword, kind: manual, note: "Create a superuser Secret; password values are never copied.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: auth.password, kind: manual, note: "credentials are never copied; create a basic-auth Secret", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: primary.initdb.scripts, kind: manual, note: "Review scripts manually: CNPG postInitApplicationSQL accepts SQL only, not shell scripts.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: metrics.enabled, kind: manual, note: "Create a PodMonitor; monitoring.enablePodMonitor is deprecated.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: tls.*, kind: manual, note: "Configure CNPG certificates manually.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: primary.resourcesPreset, kind: manual, note: "No verified mapping for the Bitnami common preset table.", source: {url: https://raw.githubusercontent.com/bitnami/charts/main/bitnami/postgresql/values.yaml, verified: 2026-10-14}}
+  - {from: backup.*, kind: unmapped, note: "Bitnami pg_dump CronJobs and CNPG barman or snapshot backups use different models.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+  - {from: image.*, kind: unmapped, note: "Use a CNPG operand image of the same or newer PostgreSQL major.", source: {url: https://github.com/cloudnative-pg/postgres-containers, verified: 2026-10-14}}
+  - {from: readReplicas.replicaCount, kind: unmapped, note: "CNPG instances form one cluster; Bitnami read replicas are separate StatefulSets.", source: {url: https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1, verified: 2026-10-14}}
+checklist:
+  - {id: import, text: "Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped).", source: {url: https://cloudnative-pg.io/docs/1.30/database_import}}
+  - {id: stop-writes, text: "Stop writes on the source before the final import; later changes are not copied.", source: {url: https://cloudnative-pg.io/docs/1.30/database_import}}
+  - {id: major-version, text: "Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used.", source: {url: https://cloudnative-pg.io/docs/1.30/database_import}}
+  - {id: storage, text: "Size PGDATA for the staged dump, data, and indexes.", source: {url: https://cloudnative-pg.io/docs/1.30/database_import}}
+  - {id: connectivity, text: "Ensure the source is reachable and the import user can run pg_dump and read roles.", source: {url: https://cloudnative-pg.io/docs/1.30/database_import}}
+  - {id: tls-default, text: "CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2.", source: {url: https://cloudnative-pg.io/docs/1.30/postgresql_conf}}

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "1",
+  "release": "pg",
+  "chart": "postgresql",
+  "chartVersion": "16.7.4",
+  "route": "cloudnative-pg",
+  "maturity": "partial",
+  "target": {
+    "apiVersion": "postgresql.cnpg.io/v1",
+    "kind": "Cluster",
+    "metadata": {
+      "name": "pg"
+    },
+    "spec": {
+      "instances": 1
+    }
+  },
+  "unmapped": [
+    {
+      "path": "auth.existingSecret",
+      "kind": "manual",
+      "note": "Create a CNPG basic-auth Secret; the Bitnami Secret layout differs."
+    },
+    {
+      "path": "auth.password",
+      "kind": "manual",
+      "note": "credentials are never copied; create a basic-auth Secret"
+    }
+  ],
+  "checklist": [
+    {
+      "text": "Choose microservice import for one database (roles are not imported) or monolith import for several databases (roles lose SUPERUSER; postgres is skipped).",
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
+    },
+    {
+      "text": "Stop writes on the source before the final import; later changes are not copied.",
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
+    },
+    {
+      "text": "Use a destination PostgreSQL major at least as new as the source; destination pg_dump is used.",
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
+    },
+    {
+      "text": "Size PGDATA for the staged dump, data, and indexes.",
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
+    },
+    {
+      "text": "Ensure the source is reachable and the import user can run pg_dump and read roles.",
+      "source": "https://cloudnative-pg.io/docs/1.30/database_import"
+    },
+    {
+      "text": "CloudNativePG defaults ssl_min_protocol_version to TLSv1.3; verify whether clients need TLS 1.2.",
+      "source": "https://cloudnative-pg.io/docs/1.30/postgresql_conf"
+    },
+    {
+      "text": "Resolve auth.existingSecret: Create a CNPG basic-auth Secret; the Bitnami Secret layout differs.",
+      "source": "https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1"
+    },
+    {
+      "text": "Resolve auth.password: credentials are never copied; create a basic-auth Secret",
+      "source": "https://cloudnative-pg.io/docs/1.30/cloudnative-pg.v1"
+    }
+  ],
+  "coverage": {
+    "mapped": 1,
+    "total": 3,
+    "derived": 0
+  }
+}

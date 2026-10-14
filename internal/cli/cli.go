@@ -44,7 +44,7 @@ func NewRootCmd(streams IO) *cobra.Command {
 	root := &cobra.Command{Use: "disdetta", Short: "Find Bitnami dependencies before migration", Args: cobra.NoArgs, SilenceUsage: true, SilenceErrors: true}
 	root.SetOut(streams.Out)
 	root.SetErr(streams.Err)
-	root.AddCommand(newVersionCmd(streams), newScanCmd(streams))
+	root.AddCommand(newVersionCmd(streams), newScanCmd(streams), newPlanCmd(streams))
 	return root
 }
 func newVersionCmd(streams IO) *cobra.Command {
@@ -199,10 +199,10 @@ func Execute(ctx context.Context, args []string, streams IO) int {
 	var coded *exitError
 	if errors.As(err, &coded) {
 		if coded.err != nil {
-			_, _ = fmt.Fprintf(streams.Err, "disdetta: %v\n", coded.err)
+			_, _ = fmt.Fprintf(streams.Err, "disdetta: %s\n", report.SafeText(coded.err.Error()))
 		}
 		return coded.code
 	}
-	_, _ = fmt.Fprintf(streams.Err, "disdetta: %v\n", err)
+	_, _ = fmt.Fprintf(streams.Err, "disdetta: %s\n", report.SafeText(err.Error()))
 	return ExitError
 }
