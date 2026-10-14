@@ -1,12 +1,13 @@
-// Package imageref parses and classifies container image references without I/O.
+// Package imageref parses and redacts container image references without I/O.
 package imageref
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 )
 
-// Classification describes ownership inferred from the repository path.
+// Classification describes the detected namespace.
 type Classification string
 
 const (
@@ -17,40 +18,27 @@ const (
 	Unresolved    Classification = "unresolved"
 )
 
-// Reference is a normalized image reference.
+var templatePattern = regexp.MustCompile(`\{\{[\s\S]*?\}\}|\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
+
+// Reference is a normalized, safely printable image reference.
 type Reference struct {
-	Original       string
-	Registry       string
-	Repository     string
-	Tag            string
-	Digest         string
-	Classification Classification
-	Redacted       bool
+	Original, Registry, Repository, Tag, Digest string
+	Classification                              Classification
+	Templated                                   bool
+	HasStaticEvidence                           bool
+	Safe                                        string
+	SafeOriginal                                string
 }
 
 // Parse parses a Docker-style image reference sufficiently for deterministic detection.
 func Parse(value string) Reference {
 	original := strings.TrimSpace(value)
-	r := Reference{Original: original}
-	if strings.Contains(original, "{{") || strings.Contains(original, "}}") {
-		prefix := original
-		if index := strings.Index(prefix, "{{"); index >= 0 {
-			prefix = prefix[:index]
-		}
-		prefix = strings.TrimRight(strings.TrimSpace(prefix), ":@/-")
-		if prefix != "" {
-			parsed := Parse(prefix)
-			r.Registry, r.Repository = parsed.Registry, parsed.Repository
-		}
-		r.Classification = Unresolved
-		r.Redacted = true
-		return r
-	}
-	name := original
-	if at, slash := strings.IndexByte(name, '@'), strings.IndexByte(name, '/'); at >= 0 && (slash < 0 || at < slash) {
-		name = name[at+1:]
-		r.Redacted = true
-	}
+	safeOriginal := templatePattern.ReplaceAllString(original, "{{…}}")
+	static := templatePattern.ReplaceAllString(original, "")
+	templated := static != original
+	name := strings.TrimSpace(static)
+	name = stripUserinfo(name)
+	r := Reference{Original: original, Templated: templated, SafeOriginal: safeOriginal}
 	if at := strings.IndexByte(name, '@'); at >= 0 {
 		r.Digest, name = name[at+1:], name[:at]
 	}
@@ -58,45 +46,52 @@ func Parse(value string) Reference {
 	if colon := strings.LastIndexByte(name, ':'); colon > lastSlash {
 		r.Tag, name = name[colon+1:], name[:colon]
 	}
+	name = strings.TrimRight(strings.TrimSpace(name), ":@/-")
 	parts := strings.Split(name, "/")
 	if len(parts) > 1 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") || parts[0] == "localhost") {
-		r.Registry, r.Repository = parts[0], strings.Join(parts[1:], "/")
-	} else {
-		r.Registry, r.Repository = "docker.io", name
+		r.Registry = normalizeRegistry(parts[0])
+		r.Repository = strings.Join(parts[1:], "/")
+	} else if name != "" {
+		r.Registry = "docker.io"
+		r.Repository = name
 	}
-	r.Registry = normalizeRegistry(r.Registry)
 	r.Repository = strings.TrimPrefix(r.Repository, "library/")
-	r.Classification = classifyRepository(r.Repository)
-	if !validTag(r.Tag) || !validDigest(r.Digest) || looksCredential(r.Tag) || looksCredential(r.Digest) || containsUnsafe(r.Registry) || containsUnsafe(r.Repository) {
-		r.Redacted = true
+	r.Classification = classify(r.Repository)
+	r.HasStaticEvidence = r.Classification != Other
+	if templated && !r.HasStaticEvidence {
+		r.Classification = Unresolved
+	}
+	r.Safe = render(r)
+	if strings.Contains(original, "@") && strings.Contains(original[:strings.Index(original, "@")], ":") {
+		r.SafeOriginal = strings.TrimPrefix(r.Safe, "docker.io/")
+	}
+	if containsUnsafe(r.SafeOriginal) {
+		r.SafeOriginal = r.Safe
 	}
 	return r
 }
 
 // Join assembles split Helm registry/repository/tag fields before parsing.
 func Join(registry, repository, tag string) Reference {
-	value := strings.TrimSuffix(strings.TrimSpace(registry), "/")
-	if value != "" {
-		value += "/"
+	v := strings.TrimSuffix(strings.TrimSpace(registry), "/")
+	if v != "" {
+		v += "/"
 	}
-	value += strings.TrimPrefix(strings.TrimSpace(repository), "/")
+	v += strings.TrimPrefix(strings.TrimSpace(repository), "/")
 	if strings.TrimSpace(tag) != "" {
-		value += ":" + strings.TrimSpace(tag)
+		v += ":" + strings.TrimSpace(tag)
 	}
-	return Parse(value)
+	return Parse(v)
 }
-
-func normalizeRegistry(registry string) string {
-	switch strings.ToLower(registry) {
+func normalizeRegistry(v string) string {
+	switch strings.ToLower(v) {
 	case "index.docker.io", "registry-1.docker.io":
 		return "docker.io"
-	default:
-		return strings.ToLower(registry)
 	}
+	return strings.ToLower(v)
 }
-
-func classifyRepository(repository string) Classification {
-	first, _, _ := strings.Cut(strings.ToLower(repository), "/")
+func classify(repo string) Classification {
+	first, _, _ := strings.Cut(strings.ToLower(repo), "/")
 	switch first {
 	case "bitnami":
 		return Bitnami
@@ -104,96 +99,74 @@ func classifyRepository(repository string) Classification {
 		return BitnamiLegacy
 	case "bitnamisecure":
 		return BitnamiSecure
-	default:
-		return Other
 	}
+	return Other
 }
-
-// String returns a normalized reference while preserving tag and digest.
-func (r Reference) String() string {
-	if r.Classification == Unresolved {
-		if r.Registry != "" && r.Repository != "" && !containsUnsafe(r.Registry) && !containsUnsafe(r.Repository) {
-			return r.Registry + "/" + r.Repository
+func render(r Reference) string {
+	if r.Registry == "" || r.Repository == "" {
+		if r.Templated {
+			return "{{…}}"
 		}
-		return "<unresolved>"
+		return ""
 	}
-	value := r.Registry + "/" + r.Repository
-	if r.Redacted {
-		registry, repository := safeName(r.Registry), safeName(r.Repository)
-		if registry == "" || repository == "" {
-			return "<redacted>"
-		}
-		return registry + "/" + repository
+	v := r.Registry + "/" + r.Repository
+	if r.Templated {
+		return v + templateSuffix(r.Original)
 	}
 	if r.Tag != "" {
-		value += ":" + r.Tag
+		v += ":" + r.Tag
 	}
 	if r.Digest != "" {
-		value += "@" + r.Digest
+		v += "@" + r.Digest
 	}
-	return value
+	if containsUnsafe(v) {
+		return r.Registry + "/" + r.Repository
+	}
+	return v
 }
-
-func validTag(tag string) bool {
-	if tag == "" {
-		return true
+func templateSuffix(v string) string {
+	idx := templatePattern.FindStringIndex(v)
+	if idx == nil {
+		return ""
 	}
-	if len(tag) > 128 {
-		return false
+	prefix := v[:idx[0]]
+	sep := ""
+	if strings.HasSuffix(prefix, ":") {
+		sep = ":"
+	} else if strings.HasSuffix(prefix, "@") {
+		sep = "@"
 	}
-	for i, r := range tag {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && (i <= 0 || (r != '.' && r != '-')) {
-			return false
+	return sep + strings.Join(make([]string, len(templatePattern.FindAllString(v, -1))), "{{…}}") + "{{…}}"
+}
+func stripUserinfo(v string) string {
+	if at := strings.LastIndexByte(v, '@'); at >= 0 {
+		before := v[:at]
+		if !strings.Contains(before, "/") || strings.Contains(before, ":") {
+			return v[at+1:]
 		}
 	}
-	return true
+	return v
 }
-
-func validDigest(digest string) bool {
-	if digest == "" {
-		return true
-	}
-	algorithm, encoded, ok := strings.Cut(digest, ":")
-	if !ok || algorithm == "" || encoded == "" {
-		return false
-	}
-	for _, r := range algorithm {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("+._-", r) {
-			return false
-		}
-	}
-	for _, r := range encoded {
-		if !unicode.IsDigit(r) && (unicode.ToLower(r) < 'a' || unicode.ToLower(r) > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func looksCredential(value string) bool {
-	lower := strings.ToLower(value)
-	for _, marker := range []string{"password", "passwd", "secret", "token", "apikey", "api_key", "credential", "bearer"} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return len(value) >= 32 && !strings.HasPrefix(lower, "sha")
-}
-
-func containsUnsafe(value string) bool {
-	for _, r := range value {
-		if unicode.IsControl(r) || unicode.IsSpace(r) || r == '@' {
+func containsUnsafe(v string) bool {
+	for _, r := range v {
+		if unicode.IsControl(r) {
 			return true
 		}
 	}
 	return false
 }
 
-func safeName(value string) string {
-	for index, r := range value {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("._:/-", r) {
-			return strings.TrimRight(value[:index], "._:/-")
-		}
+// Component returns the last repository path segment.
+func (r Reference) Component() string {
+	v := r.Repository
+	if i := strings.LastIndexByte(v, '/'); i >= 0 {
+		v = v[i+1:]
 	}
-	return value
+	return strings.ToLower(strings.Trim(v, "-:/"))
+}
+
+// IsExcluded reports projects explicitly excluded by the contract.
+func (r Reference) IsExcluded() bool {
+	n := r.Component()
+	return strings.HasPrefix(n, "sealed-secrets") || n == "minideb" || n == "charts-syncer"
 }

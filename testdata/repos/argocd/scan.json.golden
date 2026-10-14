@@ -1,35 +1,73 @@
 {
   "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 1,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 1,
+      "medium": 2,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "complete": true
+  },
   "findings": [
     {
-      "code": "DSD-002",
-      "severity": "DSD-SEV-2",
-      "message": "Bitnami legacy image",
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "application.yaml",
+        "line": 12,
+        "column": 15
+      },
       "reference": "docker.io/bitnamilegacy/redis:7",
-      "classification": "bitnamilegacy",
-      "path": "application.yaml",
-      "line": 12,
-      "stateful": true
+      "original": "bitnamilegacy/redis:7",
+      "attributes": [
+        "embedded-values"
+      ],
+      "fingerprint": "724adb2263839557"
     },
     {
-      "code": "DSD-004",
-      "severity": "DSD-SEV-3",
-      "message": "Bitnami chart source",
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "application.yaml",
+        "line": 7,
+        "column": 14
+      },
       "reference": "https://charts.bitnami.com/bitnami",
-      "classification": "chart",
-      "path": "application.yaml",
-      "line": 7,
-      "stateful": false
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "b12f0f1f80aaa467"
     },
     {
-      "code": "DSD-003",
-      "severity": "DSD-SEV-3",
-      "message": "Bitnami image",
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "redis-exporter",
+      "location": {
+        "path": "application.yaml",
+        "line": 17,
+        "column": 25
+      },
       "reference": "docker.io/bitnami/redis-exporter",
-      "classification": "bitnami",
-      "path": "application.yaml",
-      "line": 17,
-      "stateful": false
+      "original": "bitnami/redis-exporter",
+      "attributes": [],
+      "fingerprint": "e09ba9141ae24db6"
     }
   ],
   "diagnostics": []

@@ -1,68 +1,133 @@
-// Package diag defines disdetta's stable diagnostic vocabulary.
+// Package diag defines disdetta's stable finding and diagnostic contract.
 package diag
 
-// Severity is ordered by Rank, with the strongest signal first.
+// Severity is a finding's policy severity.
 type Severity string
 
 const (
-	SeverityAllowInsecure Severity = "DSD-SEV-1"
-	SeverityLegacy        Severity = "DSD-SEV-2"
-	SeverityBitnami       Severity = "DSD-SEV-3"
+	SeverityHigh   Severity = "high"
+	SeverityMedium Severity = "medium"
+	SeverityLow    Severity = "low"
 )
 
-// Diagnostic is one safely printable scanner finding.
+// Confidence describes how directly a reference identifies Docker Hub.
+type Confidence string
+
+const (
+	ConfidenceConfirmed  Confidence = "confirmed"
+	ConfidenceInferred   Confidence = "inferred"
+	ConfidenceUnresolved Confidence = "unresolved"
+)
+
+// Impact estimates migration effort.
+type Impact string
+
+const (
+	ImpactHigh    Impact = "high"
+	ImpactMedium  Impact = "medium"
+	ImpactLow     Impact = "low"
+	ImpactUnknown Impact = "unknown"
+)
+
+// Level is a scan diagnostic level.
+type Level string
+
+const (
+	LevelError   Level = "error"
+	LevelWarning Level = "warning"
+	LevelInfo    Level = "info"
+)
+
+// Location identifies a one-based source position.
+type Location struct {
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
+}
+
+// Finding is a Bitnami dependency found in configuration.
+type Finding struct {
+	RuleID      string     `json:"ruleId"`
+	Severity    Severity   `json:"severity"`
+	Confidence  Confidence `json:"confidence"`
+	Impact      Impact     `json:"impact"`
+	Component   string     `json:"component"`
+	Location    Location   `json:"location"`
+	Reference   string     `json:"reference"`
+	Original    string     `json:"original"`
+	Attributes  []string   `json:"attributes"`
+	Fingerprint string     `json:"fingerprint"`
+}
+
+// Diagnostic describes an input that could not be scanned completely.
 type Diagnostic struct {
-	Code           string   `json:"code"`
-	Severity       Severity `json:"severity"`
-	Message        string   `json:"message"`
-	Reference      string   `json:"reference"`
-	Classification string   `json:"classification"`
-	Path           string   `json:"path"`
-	Line           int      `json:"line"`
-	Stateful       bool     `json:"stateful"`
+	Code     string   `json:"code"`
+	Level    Level    `json:"level"`
+	Message  string   `json:"message"`
+	Location Location `json:"location"`
 }
 
-// ScanDiagnostic describes an input that could not be scanned completely.
-type ScanDiagnostic struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Path    string `json:"path"`
-	Line    int    `json:"line"`
+// FindingCounts groups findings by severity.
+type FindingCounts struct {
+	High   int `json:"high"`
+	Medium int `json:"medium"`
+	Low    int `json:"low"`
 }
 
-// Report is the complete, additive schema-version-1 scan result.
+// Summary describes scan coverage and totals.
+type Summary struct {
+	FilesScanned int           `json:"filesScanned"`
+	FilesSkipped int           `json:"filesSkipped"`
+	Findings     FindingCounts `json:"findings"`
+	Diagnostics  int           `json:"diagnostics"`
+	Unresolved   int           `json:"unresolved"`
+	Complete     bool          `json:"complete"`
+}
+
+// Report is the complete scan result.
 type Report struct {
-	Findings    []Diagnostic
-	Diagnostics []ScanDiagnostic
+	Summary     Summary
+	Findings    []Finding
+	Diagnostics []Diagnostic
 }
 
-// Entry describes a registered stable code.
+// Entry describes a registered rule or diagnostic code.
 type Entry struct {
 	Code     string
 	Title    string
 	Severity Severity
+	Level    Level
 }
 
 var entries = []Entry{
-	{Code: "DSD-001", Title: "allowInsecureImages is enabled", Severity: SeverityAllowInsecure},
-	{Code: "DSD-002", Title: "Bitnami legacy image", Severity: SeverityLegacy},
-	{Code: "DSD-003", Title: "Bitnami image", Severity: SeverityBitnami},
-	{Code: "DSD-004", Title: "Bitnami chart source", Severity: SeverityBitnami},
-	{Code: "DSD-005", Title: "Unresolved templated image", Severity: SeverityBitnami},
-	{Code: "DSD-006", Title: "Input not scanned completely", Severity: SeverityBitnami},
+	{Code: "DSD-CFG-001", Title: "allowInsecureImages is enabled", Severity: SeverityHigh}, {Code: "DSD-IMG-001", Title: "Bitnami legacy image", Severity: SeverityHigh}, {Code: "DSD-IMG-002", Title: "Versioned Bitnami image", Severity: SeverityHigh}, {Code: "DSD-IMG-003", Title: "Community Bitnami image", Severity: SeverityMedium}, {Code: "DSD-CHT-001", Title: "Bitnami chart source", Severity: SeverityMedium},
+	{Code: "DSD-SCN-001", Title: "Malformed file", Level: LevelError}, {Code: "DSD-SCN-002", Title: "File skipped", Level: LevelWarning}, {Code: "DSD-SCN-003", Title: "Unresolved reference", Level: LevelInfo}, {Code: "DSD-SCN-004", Title: "Read error", Level: LevelError}, {Code: "DSD-SCN-005", Title: "Limit reached", Level: LevelWarning},
 }
 
-// List returns the registry in code order.
+// List returns the registry in contract order.
 func List() []Entry { return append([]Entry(nil), entries...) }
 
-// Rank returns a stable severity sort rank.
-func Rank(s Severity) int {
-	switch s {
-	case SeverityAllowInsecure:
-		return 1
-	case SeverityLegacy:
-		return 2
-	default:
-		return 3
+// SeverityRank returns high before medium before low.
+func SeverityRank(v Severity) int {
+	if v == SeverityHigh {
+		return 0
 	}
+	if v == SeverityMedium {
+		return 1
+	}
+	return 2
+}
+
+// ImpactRank returns high, medium, low, unknown.
+func ImpactRank(v Impact) int {
+	if v == ImpactHigh {
+		return 0
+	}
+	if v == ImpactMedium {
+		return 1
+	}
+	if v == ImpactLow {
+		return 2
+	}
+	return 3
 }

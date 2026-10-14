@@ -1,20 +1,9 @@
-# Scanner diagnostics and CLI contract
+# Findings and scan diagnostics
 
-`disdetta scan [path]` reads YAML and Dockerfiles beneath `path` (default `.`),
-skipping `.git`, `node_modules`, and `vendor`. It never renders templates, uses
-the network, changes files, or emits surrounding values. `--format table` is the
-default; `--format json` emits schema version `1`.
+`disdetta scan [path]` reports Bitnami dependencies as findings and input problems as separate diagnostics. Finding rules use `DSD-CFG-*`, `DSD-IMG-*`, and `DSD-CHT-*`; scan diagnostics use `DSD-SCN-*`.
 
-Exit codes are `0` when no findings or scan diagnostics exist, `1` when either
-exists, and `2` for invalid usage or fatal root errors. Per-file failures are
-DSD-006 diagnostics and do not stop the scan. JSON schema version `1` includes
-separate `findings` and `diagnostics` arrays. Findings are sorted with stateful
-components first, then by severity, path, and line.
+The default table ends with a summary. `--format json` emits schema version `1`, described by `schemas/report-v1.json`. `--fail-on` controls the policy threshold and `--rule` filters findings without filtering diagnostics.
 
-Files over 5 MiB and YAML nested beyond 100 nodes are reported and skipped.
-Entries beneath the root that are symbolic links or non-regular files are never
-read. An explicitly supplied root symlink to a directory is resolved once before
-walking.
+Exit code `0` means the policy passed and the scan is complete; `1` means the finding policy failed; `2` means invalid usage or a fatal root error; `3` means the policy passed but an error-level diagnostic made the scan incomplete. Policy failure takes precedence over incompleteness.
 
-The YAML v3 dependency is intentional: `yaml.Node` preserves source line
-numbers needed for actionable diagnostics.
+Files larger than 5 MiB, symlinks, and non-regular files are skipped. YAML nesting is limited to 256 levels. The scanner does not render templates, access the network, or emit Kubernetes Secret values.

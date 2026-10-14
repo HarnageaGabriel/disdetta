@@ -2,36 +2,35 @@ package report
 
 import (
 	"bytes"
+	"encoding/json"
+	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"strings"
 	"testing"
-
-	"github.com/HarnageaGabriel/disdetta/internal/diag"
 )
 
-func TestTableEscapesEveryCell(t *testing.T) {
-	t.Parallel()
-	result := diag.Report{Findings: []diag.Diagnostic{{
-		Code: "DSD-003\nforged", Severity: diag.SeverityBitnami, Reference: "docker.io/bitnami/redis:\x1b[2J", Path: "bad\tpath.yaml", Line: 1,
-	}}}
-	var output bytes.Buffer
-	if err := Table(&output, result); err != nil {
+func TestTableEscapesCellsAndSummarizes(t *testing.T) {
+	r := diag.Report{Summary: diag.Summary{Complete: true}, Findings: []diag.Finding{{RuleID: "DSD-IMG-003\nforged", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactLow, Location: diag.Location{Path: "bad\tpath", Line: 1}, Reference: "x\x1b"}}}
+	var b bytes.Buffer
+	if err := Table(&b, r); err != nil {
 		t.Fatal(err)
 	}
-	got := output.String()
-	if strings.ContainsRune(got, '\x1b') || strings.Contains(got, "DSD-003\nforged") || !strings.Contains(got, `DSD-003\nforged`) || !strings.Contains(got, `bad\tpath.yaml`) {
-		t.Fatalf("source review finding 2: unsafe table output %q", got)
+	s := b.String()
+	if strings.ContainsRune(s, '\x1b') || strings.Contains(s, "forged\nmedium") || !strings.Contains(s, "scanned 0 files") {
+		t.Fatalf("source docs/spec/v0.1.md sections 6,8: %q", s)
 	}
 }
-
-func TestJSONHasSeparateDiagnostics(t *testing.T) {
-	t.Parallel()
-	result := diag.Report{Diagnostics: []diag.ScanDiagnostic{{Code: "DSD-006", Message: "malformed YAML", Path: "bad.yaml"}}}
-	var output bytes.Buffer
-	if err := JSON(&output, result); err != nil {
+func TestJSONEnvelope(t *testing.T) {
+	var b bytes.Buffer
+	if err := JSON(&b, diag.Report{Summary: diag.Summary{Complete: true}}); err != nil {
 		t.Fatal(err)
 	}
-	got := output.String()
-	if !strings.Contains(got, `"findings": []`) || !strings.Contains(got, `"diagnostics": [`) {
-		t.Fatalf("source review finding 3: incomplete JSON envelope %s", got)
+	var v map[string]any
+	if err := json.Unmarshal(b.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"schemaVersion", "tool", "summary", "findings", "diagnostics"} {
+		if _, ok := v[key]; !ok {
+			t.Errorf("source docs/spec/v0.1.md section 8: missing %s", key)
+		}
 	}
 }

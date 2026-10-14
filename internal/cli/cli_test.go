@@ -8,35 +8,36 @@ import (
 	"testing"
 )
 
-func TestScanExitCodes(t *testing.T) {
-	t.Parallel()
+func TestExitCodeMatrix(t *testing.T) {
+	finding := write(t, "image: bitnami/redis:7\n")
+	malformed := write(t, "image: [\n")
 	tests := []struct {
-		name, source string
-		args         []string
-		want         int
-	}{
-		{"findings", "docs/diagnostics/README.md", []string{"scan", filepath.Join("..", "..", "testdata", "repos", "helm")}, ExitFindings},
-		{"diagnostics", "review finding 3", []string{"scan", writeMalformedYAML(t)}, ExitFindings},
-		{"usage", "docs/diagnostics/README.md", []string{"scan", "--format", "xml"}, ExitError},
-		{"version", "M0 CLI milestone", []string{"version"}, ExitOK},
-	}
+		name string
+		args []string
+		want int
+	}{{"default", []string{"scan", finding}, 1}, {"above threshold", []string{"scan", finding, "--fail-on", "high"}, 1}, {"none", []string{"scan", finding, "--fail-on", "none"}, 0}, {"incomplete", []string{"scan", malformed}, 3}, {"usage", []string{"scan", "--fail-on", "bad"}, 2}, {"missing", []string{"scan", filepath.Join(t.TempDir(), "missing")}, 2}}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var stdout, stderr bytes.Buffer
-			if got := Execute(context.Background(), tt.args, IO{Out: &stdout, Err: &stderr}); got != tt.want {
-				t.Errorf("source %s: got exit %d, want %d; stderr=%s", tt.source, got, tt.want, stderr.String())
+			var out, err bytes.Buffer
+			if got := Execute(context.Background(), tt.args, IO{Out: &out, Err: &err}); got != tt.want {
+				t.Fatalf("source docs/spec/v0.1.md section 7: got %d want %d stderr %s", got, tt.want, err.String())
 			}
 		})
 	}
 }
-
-func writeMalformedYAML(t *testing.T) string {
+func TestRuleFilter(t *testing.T) {
+	path := write(t, "image: bitnami/redis:7\nother:\n  image: bitnami/nginx:latest\n")
+	var out, err bytes.Buffer
+	got := Execute(context.Background(), []string{"scan", path, "--rule", "DSD-IMG-003"}, IO{Out: &out, Err: &err})
+	if got != 1 || bytes.Contains(out.Bytes(), []byte("DSD-IMG-002")) {
+		t.Fatalf("source docs/spec/v0.1.md section 7: exit=%d output=%s", got, out.String())
+	}
+}
+func write(t *testing.T, data string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "bad.yaml")
-	if err := os.WriteFile(path, []byte("image: [\n"), 0o644); err != nil {
+	p := filepath.Join(t.TempDir(), "input.yaml")
+	if err := os.WriteFile(p, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return path
+	return p
 }

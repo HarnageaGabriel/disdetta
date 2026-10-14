@@ -47,19 +47,21 @@ go install github.com/HarnageaGabriel/disdetta/cmd/disdetta@latest
 disdetta scan .
 ```
 
-Every Bitnami reference, with file and line, stateful components first:
+Every Bitnami reference, with file, line and column, most urgent first:
 
 ```text
-LOCATION        CODE     SEVERITY   STATEFUL  REFERENCE
-values.yaml:6   DSD-002  DSD-SEV-2  true      docker.io/bitnamilegacy/postgresql:16.4.0
-Dockerfile:1    DSD-003  DSD-SEV-3  true      docker.io/bitnami/redis:7
-values.yaml:4   DSD-001  DSD-SEV-1  false     true
-Chart.yaml:7    DSD-004  DSD-SEV-3  false     https://charts.bitnami.com/bitnami
-values.yaml:10  DSD-003  DSD-SEV-3  false     docker.io/bitnami/postgres-exporter:latest
+LOCATION           RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
+Dockerfile:1:1     DSD-IMG-002  high      confirmed   high     docker.io/bitnami/redis:7
+values.yaml:6:15   DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql:16.4.0
+values.yaml:4:26   DSD-CFG-001  high      confirmed   unknown  true
+Chart.yaml:7:17    DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
+values.yaml:10:17  DSD-IMG-003  medium    confirmed   low      docker.io/bitnami/postgres-exporter:latest
+scanned 3 files, skipped 0, findings 5 (high 3, medium 2, low 0), diagnostics 0, unresolved 0
 ```
 
-Exit status 0 means no findings, 1 means findings, 2 means a usage or runtime
-error. `--format json` gives a stable, versioned document for CI.
+Exit status 0 means no findings, 1 means findings (tune with `--fail-on`), 2
+means a usage or fatal error, 3 means the scan was incomplete. Rules and codes:
+[docs/diagnostics](docs/diagnostics/README.md); contract: [docs/spec/v0.1.md](docs/spec/v0.1.md). `--format json` gives a stable, versioned document for CI.
 
 ## Why
 

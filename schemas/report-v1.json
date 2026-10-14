@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://disdetta.dev/schemas/report-v1.json",
+  "title": "disdetta report schema v1",
+  "type": "object",
+  "required": ["schemaVersion", "tool", "summary", "findings", "diagnostics"],
+  "properties": {
+    "schemaVersion": {"const": "1"},
+    "tool": {"type": "object", "required": ["name", "version"], "properties": {"name": {"const": "disdetta"}, "version": {"type": "string"}}, "additionalProperties": false},
+    "summary": {"type": "object", "required": ["filesScanned", "filesSkipped", "findings", "diagnostics", "unresolved", "complete"], "properties": {
+      "filesScanned": {"type": "integer", "minimum": 0}, "filesSkipped": {"type": "integer", "minimum": 0},
+      "findings": {"type": "object", "required": ["high", "medium", "low"], "properties": {"high": {"type": "integer", "minimum": 0}, "medium": {"type": "integer", "minimum": 0}, "low": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
+      "diagnostics": {"type": "integer", "minimum": 0}, "unresolved": {"type": "integer", "minimum": 0}, "complete": {"type": "boolean"}
+    }, "additionalProperties": false},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "location": {"type": "object", "required": ["path", "line", "column"], "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 0}, "column": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
+    "finding": {"type": "object", "required": ["ruleId", "severity", "confidence", "impact", "component", "location", "reference", "original", "attributes", "fingerprint"], "properties": {
+      "ruleId": {"enum": ["DSD-CFG-001", "DSD-IMG-001", "DSD-IMG-002", "DSD-IMG-003", "DSD-CHT-001"]}, "severity": {"enum": ["high", "medium", "low"]}, "confidence": {"enum": ["confirmed", "inferred", "unresolved"]}, "impact": {"enum": ["high", "medium", "low", "unknown"]}, "component": {"type": "string"}, "location": {"$ref": "#/$defs/location"}, "reference": {"type": "string"}, "original": {"type": "string"}, "attributes": {"type": "array", "items": {"enum": ["mirror", "pull-risk", "chart", "embedded-values"]}}, "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{16}$"}
+    }, "additionalProperties": false},
+    "diagnostic": {"type": "object", "required": ["code", "level", "message", "location"], "properties": {"code": {"enum": ["DSD-SCN-001", "DSD-SCN-002", "DSD-SCN-003", "DSD-SCN-004", "DSD-SCN-005"]}, "level": {"enum": ["error", "warning", "info"]}, "message": {"type": "string"}, "location": {"$ref": "#/$defs/location"}}, "additionalProperties": false}
+  }
+}

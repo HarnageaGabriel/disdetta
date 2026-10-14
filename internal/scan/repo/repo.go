@@ -3,62 +3,67 @@ package repo
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"github.com/HarnageaGabriel/disdetta/internal/detect"
+	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
-
-	"github.com/HarnageaGabriel/disdetta/internal/detect"
-	"github.com/HarnageaGabriel/disdetta/internal/diag"
 )
 
 var skippedDirectories = map[string]bool{".git": true, "node_modules": true, "vendor": true}
 
 const maxFileSize = 5 * 1024 * 1024
 
-// Scan walks root without changing it and returns deterministically sorted findings.
+// Scan walks root without changing it and returns a deterministic report.
 func Scan(ctx context.Context, root string) (diag.Report, error) {
-	originalRoot := root
+	original := root
 	info, err := os.Lstat(root)
 	if err != nil {
 		return diag.Report{}, fmt.Errorf("scan %s: %w", root, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		resolved, resolveErr := filepath.EvalSymlinks(root)
-		if resolveErr != nil {
-			return diag.Report{}, fmt.Errorf("resolve scan root %s: %w", root, resolveErr)
+		resolved, e := filepath.EvalSymlinks(root)
+		if e != nil {
+			return diag.Report{}, fmt.Errorf("resolve scan root %s: %w", root, e)
 		}
-		resolvedInfo, statErr := os.Stat(resolved)
-		if statErr != nil {
-			return diag.Report{}, fmt.Errorf("scan %s: %w", root, statErr)
+		resolvedInfo, e := os.Stat(resolved)
+		if e != nil {
+			return diag.Report{}, fmt.Errorf("scan %s: %w", root, e)
 		}
 		if !resolvedInfo.IsDir() {
-			return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(filepath.Base(root), "symbolic-link root is not a directory; file skipped")}}, nil
+			r := diag.Report{Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "symbolic-link root file skipped")}}
+			finalize(&r)
+			return r, nil
 		}
 		root, info = resolved, resolvedInfo
 	}
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
-			return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(filepath.Base(root), "non-regular file skipped")}}, nil
+			r := diag.Report{Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "non-regular file skipped")}}
+			finalize(&r)
+			return r, nil
 		}
-		result := scanFile(root, filepath.Base(root), info)
-		Sort(&result)
-		return result, nil
+		r := scanFile(root, filepath.Base(root), info)
+		finalize(&r)
+		return r, nil
 	}
-	var result diag.Report
+	var out diag.Report
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if path == root {
 				return walkErr
 			}
-			relative, relErr := filepath.Rel(root, path)
-			if relErr != nil {
-				return relErr
+			rel, e := filepath.Rel(root, path)
+			if e != nil {
+				return e
 			}
-			result.Diagnostics = append(result.Diagnostics, scanDiagnostic(filepath.ToSlash(relative), "path could not be read: "+walkErr.Error()))
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, filepath.ToSlash(rel), "path could not be read"))
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -70,120 +75,169 @@ func Scan(ctx context.Context, root string) (diag.Report, error) {
 			}
 			return nil
 		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
+		rel, e := filepath.Rel(root, path)
+		if e != nil {
+			return e
 		}
-		displayPath := filepath.ToSlash(relative)
+		display := filepath.ToSlash(rel)
 		if entry.Type()&os.ModeSymlink != 0 {
-			result.Diagnostics = append(result.Diagnostics, scanDiagnostic(displayPath, "symbolic link skipped"))
+			out.Summary.FilesSkipped++
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "symbolic link skipped"))
 			return nil
 		}
-		entryInfo, err := entry.Info()
-		if err != nil {
-			result.Diagnostics = append(result.Diagnostics, scanDiagnostic(displayPath, "file metadata could not be read: "+err.Error()))
+		entryInfo, e := entry.Info()
+		if e != nil {
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file metadata could not be read"))
 			return nil
 		}
 		if !entryInfo.Mode().IsRegular() {
-			result.Diagnostics = append(result.Diagnostics, scanDiagnostic(displayPath, "non-regular file skipped"))
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "non-regular file skipped"))
 			return nil
 		}
-		appendReport(&result, scanFile(path, displayPath, entryInfo))
+		appendReport(&out, scanFile(path, display, entryInfo))
 		return nil
 	})
 	if err != nil {
-		return diag.Report{}, fmt.Errorf("walk %s: %w", originalRoot, err)
+		return diag.Report{}, fmt.Errorf("walk %s: %w", original, err)
 	}
-	Sort(&result)
-	return result, nil
+	finalize(&out)
+	return out, nil
 }
-
-func scanFile(path, displayPath string, info fs.FileInfo) (report diag.Report) {
+func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	lower := strings.ToLower(info.Name())
-	isYAML := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
-	isDockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.")
-	if !isYAML && !isDockerfile {
-		return diag.Report{}
+	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
+	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.")
+	if !yamlFile && !dockerfile {
+		return out
 	}
 	if info.Size() > maxFileSize {
-		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file exceeds 5 MiB limit; skipped")}}
+		out.Summary.FilesSkipped++
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "file exceeds 5 MiB limit; skipped")}
+		return out
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file could not be read: "+err.Error())}}
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file could not be read")}
+		return out
 	}
-	readSucceeded := false
+	readOK := false
 	defer func() {
-		closeErr := file.Close()
-		if closeErr == nil {
-			return
+		if e := file.Close(); e != nil && readOK {
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file could not be closed"))
 		}
-		if !readSucceeded {
-			// The read already failed and produced a diagnostic; the close error
-			// carries no additional signal here and is deliberately ignored.
-			return
-		}
-		report.Diagnostics = append(report.Diagnostics, scanDiagnostic(displayPath, "file could not be closed: "+closeErr.Error()))
 	}()
-	openedInfo, err := file.Stat()
-	if err != nil {
-		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file metadata could not be read: "+err.Error())}}
+	opened, e := file.Stat()
+	if e != nil {
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file metadata could not be read")}
+		return out
 	}
-	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
-		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file changed or became non-regular; skipped")}}
+	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		out.Summary.FilesSkipped++
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "file changed or became non-regular; skipped")}
+		return out
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maxFileSize+1))
-	if err != nil {
-		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file could not be read: "+err.Error())}}
+	data, e := io.ReadAll(io.LimitReader(file, maxFileSize+1))
+	if e != nil {
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-004", diag.LevelError, display, "file could not be read")}
+		return out
 	}
-	readSucceeded = true
+	readOK = true
 	if len(data) > maxFileSize {
-		return diag.Report{Diagnostics: []diag.ScanDiagnostic{scanDiagnostic(displayPath, "file exceeds 5 MiB limit; skipped")}}
+		out.Summary.FilesSkipped++
+		out.Diagnostics = []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, display, "file exceeds 5 MiB limit; skipped")}
+		return out
 	}
-	if isDockerfile {
-		return detect.Dockerfile(displayPath, data)
+	out.Summary.FilesScanned = 1
+	if dockerfile {
+		detected := detect.Dockerfile(display, data)
+		detected.Summary.FilesScanned = 1
+		return detected
 	}
-	return detect.YAML(displayPath, data)
+	detected := detect.YAML(display, data)
+	detected.Summary.FilesScanned = 1
+	return detected
+}
+func appendReport(dst *diag.Report, src diag.Report) {
+	dst.Summary.FilesScanned += src.Summary.FilesScanned
+	dst.Summary.FilesSkipped += src.Summary.FilesSkipped
+	dst.Findings = append(dst.Findings, src.Findings...)
+	dst.Diagnostics = append(dst.Diagnostics, src.Diagnostics...)
+}
+func scanDiagnostic(code string, level diag.Level, path, message string) diag.Diagnostic {
+	return diag.Diagnostic{Code: code, Level: level, Message: message, Location: diag.Location{Path: path}}
 }
 
-func appendReport(destination *diag.Report, source diag.Report) {
-	destination.Findings = append(destination.Findings, source.Findings...)
-	destination.Diagnostics = append(destination.Diagnostics, source.Diagnostics...)
+// Finalize calculates fingerprints, summary fields, and contract ordering.
+func finalize(r *diag.Report) {
+	occ := map[string]int{}
+	for i := range r.Findings {
+		f := &r.Findings[i]
+		key := f.RuleID + "\x00" + f.Location.Path + "\x00" + f.Reference
+		n := occ[key]
+		occ[key] = n + 1
+		sum := sha256.Sum256([]byte(key + "\x00" + strconv.Itoa(n)))
+		f.Fingerprint = fmt.Sprintf("%x", sum[:8])
+		if f.Attributes == nil {
+			f.Attributes = []string{}
+		}
+	}
+	Sort(r)
+	r.Summary.Findings = diag.FindingCounts{}
+	r.Summary.Unresolved = 0
+	for _, f := range r.Findings {
+		switch f.Severity {
+		case diag.SeverityHigh:
+			r.Summary.Findings.High++
+		case diag.SeverityMedium:
+			r.Summary.Findings.Medium++
+		case diag.SeverityLow:
+			r.Summary.Findings.Low++
+		}
+		if f.Confidence == diag.ConfidenceUnresolved {
+			r.Summary.Unresolved++
+		}
+	}
+	r.Summary.Diagnostics = len(r.Diagnostics)
+	r.Summary.Complete = true
+	for _, d := range r.Diagnostics {
+		if d.Code == "DSD-SCN-003" {
+			r.Summary.Unresolved++
+		}
+		if d.Level == diag.LevelError {
+			r.Summary.Complete = false
+		}
+	}
 }
 
-func scanDiagnostic(path, message string) diag.ScanDiagnostic {
-	return diag.ScanDiagnostic{Code: "DSD-006", Message: message, Path: path}
-}
-
-// Sort applies stable ordering to findings and scan diagnostics.
-func Sort(result *diag.Report) {
-	sort.SliceStable(result.Findings, func(i, j int) bool {
-		a, b := result.Findings[i], result.Findings[j]
-		if a.Stateful != b.Stateful {
-			return a.Stateful
+// Sort applies contract ordering.
+func Sort(r *diag.Report) {
+	sort.SliceStable(r.Findings, func(i, j int) bool {
+		a, b := r.Findings[i], r.Findings[j]
+		if diag.SeverityRank(a.Severity) != diag.SeverityRank(b.Severity) {
+			return diag.SeverityRank(a.Severity) < diag.SeverityRank(b.Severity)
 		}
-		if diag.Rank(a.Severity) != diag.Rank(b.Severity) {
-			return diag.Rank(a.Severity) < diag.Rank(b.Severity)
+		if diag.ImpactRank(a.Impact) != diag.ImpactRank(b.Impact) {
+			return diag.ImpactRank(a.Impact) < diag.ImpactRank(b.Impact)
 		}
-		if a.Path != b.Path {
-			return a.Path < b.Path
+		if a.Location.Path != b.Location.Path {
+			return a.Location.Path < b.Location.Path
 		}
-		if a.Line != b.Line {
-			return a.Line < b.Line
+		if a.Location.Line != b.Location.Line {
+			return a.Location.Line < b.Location.Line
 		}
-		if a.Code != b.Code {
-			return a.Code < b.Code
+		if a.Location.Column != b.Location.Column {
+			return a.Location.Column < b.Location.Column
 		}
-		return a.Reference < b.Reference
+		return a.RuleID < b.RuleID
 	})
-	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
-		a, b := result.Diagnostics[i], result.Diagnostics[j]
-		if a.Path != b.Path {
-			return a.Path < b.Path
+	sort.SliceStable(r.Diagnostics, func(i, j int) bool {
+		a, b := r.Diagnostics[i], r.Diagnostics[j]
+		if a.Location.Path != b.Location.Path {
+			return a.Location.Path < b.Location.Path
 		}
-		if a.Line != b.Line {
-			return a.Line < b.Line
+		if a.Location.Line != b.Location.Line {
+			return a.Location.Line < b.Location.Line
 		}
-		return a.Message < b.Message
+		return a.Code < b.Code
 	})
 }
