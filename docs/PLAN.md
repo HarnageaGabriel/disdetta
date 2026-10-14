@@ -4,6 +4,16 @@ Smallest useful command first: `disdetta scan .` lists every Bitnami reference w
 
 Revision 2 (2026-10-14): revised after the scan MVP review and a second look at the study notes. Changes are listed in [Review of revision 1](#review-of-revision-1).
 
+## Decisions (2026-10-14)
+After an external audit of the repository (ChatGPT, on `main` only) and the scan MVP review:
+1. v0.1.0 contract fixed in [spec/v0.1.md](spec/v0.1.md): rule IDs by category (`DSD-CFG-*`, `DSD-IMG-*`, `DSD-CHT-*`), scanner diagnostics `DSD-SCN-*`, separate severity / confidence / migration impact, fingerprints, summary, exit code 3 for incomplete scans. The never-released `DSD-001..006` codes are dropped. This supersedes the severity model below.
+2. Severity stays signal-based (high/medium/low). No CVE or exposure scoring: it would need external data and break determinism.
+3. `plan`: PostgreSQL -> CloudNativePG is the first plan verified end to end. Redis/Valkey, Kafka, MongoDB, Keycloak ship as route + checklist, and gain value mappings only as each mapping is verified.
+4. The repository stays private until the v0.1.0 release; `go install` in the README works from then on.
+5. Cluster scan uses a flag (`scan --cluster`), not a subcommand, so a directory named `cluster` stays scannable.
+6. Later, when the cluster scan lands: group evidence by component and release (one operational problem, N evidences), using plain Go structures, no graph database.
+7. A threat model document (`docs/threat-model.md`) before the cluster scan: Helm Secret decoding, decompression limits, filesystem boundaries, minimal RBAC.
+
 ## Principles (family rules)
 Go single binary, Apache-2.0, read-only, deterministic (no AI in the main path), no telemetry, secrets never in output, stable diagnostics `DSD-*` with docs pages, table output + versioned JSON + SARIF, documented exit codes, no shared library with sibling tools until three tools duplicate it.
 

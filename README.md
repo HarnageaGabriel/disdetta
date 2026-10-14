@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/disdetta-logo-dark.png">
-    <img src="docs/assets/disdetta-logo.png" alt="disdetta" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/disdetta-logo-dark.svg">
+    <img src="docs/assets/disdetta-logo.svg" alt="disdetta" width="420">
   </picture>
 </p>
 
