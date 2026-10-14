@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"github.com/HarnageaGabriel/disdetta/internal/report"
+	"github.com/HarnageaGabriel/disdetta/internal/scan/cluster"
 	"github.com/HarnageaGabriel/disdetta/internal/scan/repo"
 	"github.com/spf13/cobra"
 	"io"
@@ -51,8 +52,12 @@ func newVersionCmd(streams IO) *cobra.Command {
 }
 func newScanCmd(streams IO) *cobra.Command {
 	format, failOn, config := "table", "low", ""
-	var rules, exclude []string
-	cmd := &cobra.Command{Use: "scan [path]", Short: "Find Bitnami references in a repository", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	var rules, exclude, namespaces []string
+	var clusterScan bool
+	var contextName, kubeconfig string
+	var readHelmSecrets bool
+	var timeout time.Duration
+	cmd := &cobra.Command{Use: "scan [path]", Short: "Find Bitnami references in a repository or a cluster", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if format != "table" && format != "json" {
 			return &exitError{ExitError, fmt.Errorf("invalid --format %q (want table or json)", format)}
 		}
@@ -67,13 +72,33 @@ func newScanCmd(streams IO) *cobra.Command {
 			}
 			allowed[id] = true
 		}
-		path := "."
-		if len(args) == 1 {
-			path = args[0]
+		if clusterScan && len(args) == 1 {
+			return &exitError{ExitError, errors.New("cannot combine a path with --cluster")}
 		}
-		result, e := repo.ScanWithOptions(cmd.Context(), path, repo.Options{ConfigPath: config, Clock: time.Now, Exclude: exclude})
-		if e != nil {
-			return &exitError{ExitError, e}
+		if clusterScan && len(exclude) > 0 {
+			return &exitError{ExitError, errors.New("--exclude applies to repository scans only")}
+		}
+		var result diag.Report
+		var scanErr error
+		if clusterScan {
+			options := cluster.Options{Context: contextName, Kubeconfig: kubeconfig, Namespaces: namespaces, ReadHelmSecrets: readHelmSecrets, Timeout: timeout}
+			source, err := cluster.NewClientSource(options)
+			if err != nil {
+				return &exitError{ExitError, err}
+			}
+			result, scanErr = cluster.Scan(cmd.Context(), source, options)
+			if scanErr == nil && config != "" {
+				scanErr = repo.ApplyIgnoreFile(&result, config, time.Now())
+			}
+		} else {
+			path := "."
+			if len(args) == 1 {
+				path = args[0]
+			}
+			result, scanErr = repo.ScanWithOptions(cmd.Context(), path, repo.Options{ConfigPath: config, Clock: time.Now, Exclude: exclude})
+		}
+		if scanErr != nil {
+			return &exitError{ExitError, scanErr}
 		}
 		if len(allowed) > 0 {
 			filtered := result.Findings[:0]
@@ -86,12 +111,12 @@ func newScanCmd(streams IO) *cobra.Command {
 			recount(&result)
 		}
 		if format == "json" {
-			e = report.JSON(streams.Out, result)
+			scanErr = report.JSON(streams.Out, result)
 		} else {
-			e = report.Table(streams.Out, result)
+			scanErr = report.Table(streams.Out, result)
 		}
-		if e != nil {
-			return &exitError{ExitError, fmt.Errorf("write report: %w", e)}
+		if scanErr != nil {
+			return &exitError{ExitError, fmt.Errorf("write report: %w", scanErr)}
 		}
 		for _, f := range result.Findings {
 			if threshold >= 0 && diag.SeverityRank(f.Severity) <= threshold {
@@ -108,6 +133,12 @@ func newScanCmd(streams IO) *cobra.Command {
 	cmd.Flags().StringArrayVar(&rules, "rule", nil, "include finding rule ID (repeatable)")
 	cmd.Flags().StringArrayVar(&exclude, "exclude", nil, "skip paths matching a slash-separated glob relative to the root (repeatable, ** supported)")
 	cmd.Flags().StringVar(&config, "config", "", "ignore configuration file (default .disdetta.yaml at scan root)")
+	cmd.Flags().BoolVar(&clusterScan, "cluster", false, "scan a Kubernetes cluster instead of a path (spec v0.2)")
+	cmd.Flags().StringVar(&contextName, "context", "", "kubeconfig context to use with --cluster")
+	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file to use with --cluster (default kubectl resolution)")
+	cmd.Flags().StringArrayVar(&namespaces, "namespace", nil, "namespace to scan with --cluster (repeatable; default all namespaces)")
+	cmd.Flags().BoolVar(&readHelmSecrets, "read-helm-secrets", false, "read Helm release Secrets for tier 3 (may contain credentials)")
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "per-list timeout for --cluster (e.g. 30s)")
 	return cmd
 }
 func parseThreshold(v string) (int, bool) {
@@ -131,6 +162,9 @@ func isRule(v string) bool {
 	}
 	return false
 }
+
+// recount recomputes the summary fields that a --rule filter or an ignore file
+// can change, including the cluster release count and groups.
 func recount(r *diag.Report) {
 	r.Summary.Findings = diag.FindingCounts{}
 	unresolved := 0
@@ -150,6 +184,8 @@ func recount(r *diag.Report) {
 		}
 	}
 	r.Summary.Unresolved = unresolved
+	r.Summary.Diagnostics = len(r.Diagnostics)
+	r.Summary.Releases, r.Groups = diag.ClusterSummary(r.Findings)
 }
 
 // Execute runs the CLI and maps errors to stable exit codes.

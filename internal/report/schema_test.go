@@ -19,8 +19,16 @@ func TestReportSchema(t *testing.T) {
 		t.Fatalf("compile schema: %v", err)
 	}
 	goldens, err := filepath.Glob(filepath.Join(root, "testdata", "repos", "*", "scan.json.golden"))
-	if err != nil || len(goldens) == 0 {
-		t.Fatalf("no JSON goldens found: %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clusterGoldens, err := filepath.Glob(filepath.Join(root, "testdata", "cluster", "*", "scan.json.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goldens = append(goldens, clusterGoldens...)
+	if len(goldens) == 0 {
+		t.Fatalf("no JSON goldens found")
 	}
 	for _, g := range goldens {
 		t.Run(filepath.Base(filepath.Dir(g)), func(t *testing.T) {

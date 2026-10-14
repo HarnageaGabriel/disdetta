@@ -149,18 +149,46 @@ func (s *walkState) addRef(r imageref.Reference, line, column int, embedded bool
 	s.addRefConfidence(r, line, column, embedded, false)
 }
 
-// addRefConfidence records a finding. forceInferred marks a reference found
-// inside a template action, whose runtime value is not certain (section 9.1).
+// addRefConfidence records the v0.1 outcome for one reference at a position.
+// forceInferred marks a reference found inside a template action, whose runtime
+// value is not certain (section 9.1).
 func (s *walkState) addRefConfidence(r imageref.Reference, line, column int, embedded bool, forceInferred bool) {
+	c, ok, unresolved := ClassifyReference(r, embedded, forceInferred)
+	switch {
+	case unresolved:
+		s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-003", diag.LevelInfo, s.path, line, column, "unresolved reference without Bitnami evidence"))
+	case ok:
+		s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: c.Rule, Severity: c.Severity, Confidence: c.Confidence, Impact: c.Impact, Component: c.Component, Location: loc(s.path, line, column), Reference: c.Reference, Original: c.Original, Attributes: c.Attributes})
+	}
+}
+
+// Classification is the v0.1 rule-selection outcome for one image reference
+// (spec v0.1 section 2.1).
+type Classification struct {
+	Rule       string
+	Severity   diag.Severity
+	Confidence diag.Confidence
+	Impact     diag.Impact
+	Component  string
+	Attributes []string
+	Reference  string
+	Original   string
+}
+
+// ClassifyReference applies the v0.1 rule selection to a parsed image
+// reference (spec v0.1 section 2.1). ok is false when the reference is not a
+// reportable Bitnami dependency; unresolved is true for the DSD-SCN-003 case (a
+// diagnostic, not a finding), never together with ok. The cluster scan reuses
+// this selection (spec v0.2 section 3).
+func ClassifyReference(r imageref.Reference, embedded, forceInferred bool) (c Classification, ok, unresolved bool) {
 	if r.IsExcluded() {
-		return
+		return Classification{}, false, false
 	}
 	if r.Classification == imageref.Unresolved && !r.HasStaticEvidence {
-		s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-003", diag.LevelInfo, s.path, line, column, "unresolved reference without Bitnami evidence"))
-		return
+		return Classification{}, false, true
 	}
 	if !r.HasStaticEvidence {
-		return
+		return Classification{}, false, false
 	}
 	rule := ""
 	sev := diag.SeverityHigh
@@ -194,7 +222,7 @@ func (s *walkState) addRefConfidence(r imageref.Reference, line, column int, emb
 			attrs = append(attrs, "pull-risk")
 		}
 	default:
-		return
+		return Classification{}, false, false
 	}
 	confidence := diag.ConfidenceConfirmed
 	if r.Templated {
@@ -210,7 +238,7 @@ func (s *walkState) addRefConfidence(r imageref.Reference, line, column int, emb
 		attrs = append(attrs, "embedded-values")
 	}
 	sort.Strings(attrs)
-	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: rule, Severity: sev, Confidence: confidence, Impact: catalog.Impact(r.Component()), Component: r.Component(), Location: loc(s.path, line, column), Reference: r.Safe, Original: r.SafeOriginal, Attributes: attrs})
+	return Classification{Rule: rule, Severity: sev, Confidence: confidence, Impact: catalog.Impact(r.Component()), Component: r.Component(), Attributes: attrs, Reference: r.Safe, Original: r.SafeOriginal}, true, false
 }
 
 // scanConfig reports DSD-CFG-001 for global.security.allowInsecureImages at any

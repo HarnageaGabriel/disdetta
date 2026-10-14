@@ -1,0 +1,45 @@
+name: Kind cluster scan
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Nightly at 03:17 UTC; the cluster scan needs docker and a network, so it
+    # does not run on pull requests.
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Install kind
+        # Pinned for reproducible CI (verified 2026-10-14); update deliberately. The download
+        # is checked against the sha256 published by the same release.
+        run: |
+          curl -fsSL -o ./kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          curl -fsSL -o ./kind.sha256 https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64.sha256sum
+          echo "$(awk '{print $1}' ./kind.sha256)  ./kind" | sha256sum -c -
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+      - name: Install helm
+        # Pinned for reproducible CI (verified 2026-10-14); update deliberately. The download
+        # is checked against the sha256 published by the same release.
+        run: |
+          curl -fsSL -o helm.tar.gz https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz
+          curl -fsSL -o helm.tar.gz.sha256 https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz.sha256
+          echo "$(awk '{print $1}' helm.tar.gz.sha256)  helm.tar.gz" | sha256sum -c -
+          tar -xzf helm.tar.gz
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+          rm -rf linux-amd64 helm.tar.gz helm.tar.gz.sha256
+          helm version
+      - name: Run the cluster scan kind test
+        run: bash test/kind/run.sh
