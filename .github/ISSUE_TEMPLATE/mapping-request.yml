@@ -1,0 +1,33 @@
+name: Exit route or value mapping
+description: Propose or correct a migration route or a values mapping for a Bitnami chart
+title: "catalog: "
+labels: [area/catalog]
+body:
+  - type: input
+    id: chart
+    attributes:
+      label: Bitnami chart and major version
+      placeholder: postgresql 16.x
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Destination
+      placeholder: CloudNativePG 1.27 Cluster, valkey-io/valkey-helm 0.x, ...
+    validations:
+      required: true
+  - type: textarea
+    id: mapping
+    attributes:
+      label: Mapping
+      description: One row per key, `bitnami.key -> target.field`, with the kind (rename, transform, constant, manual, unmapped).
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Public sources
+      description: Required. Links to pinned docs or source for both sides. Mappings without a source are not accepted.
+    validations:
+      required: true
