@@ -5,9 +5,16 @@ skipping `.git`, `node_modules`, and `vendor`. It never renders templates, uses
 the network, changes files, or emits surrounding values. `--format table` is the
 default; `--format json` emits schema version `1`.
 
-Exit codes are `0` when no findings exist, `1` when findings exist, and `2` for
-invalid usage or runtime errors. Findings are sorted with stateful components
-first, then by severity, path, and line.
+Exit codes are `0` when no findings or scan diagnostics exist, `1` when either
+exists, and `2` for invalid usage or fatal root errors. Per-file failures are
+DSD-006 diagnostics and do not stop the scan. JSON schema version `1` includes
+separate `findings` and `diagnostics` arrays. Findings are sorted with stateful
+components first, then by severity, path, and line.
+
+Files over 5 MiB and YAML nested beyond 100 nodes are reported and skipped.
+Entries beneath the root that are symbolic links or non-regular files are never
+read. An explicitly supplied root symlink to a directory is resolved once before
+walking.
 
 The YAML v3 dependency is intentional: `yaml.Node` preserves source line
 numbers needed for actionable diagnostics.

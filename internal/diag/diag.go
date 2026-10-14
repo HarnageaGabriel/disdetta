@@ -22,6 +22,20 @@ type Diagnostic struct {
 	Stateful       bool     `json:"stateful"`
 }
 
+// ScanDiagnostic describes an input that could not be scanned completely.
+type ScanDiagnostic struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+}
+
+// Report is the complete, additive schema-version-1 scan result.
+type Report struct {
+	Findings    []Diagnostic
+	Diagnostics []ScanDiagnostic
+}
+
 // Entry describes a registered stable code.
 type Entry struct {
 	Code     string
@@ -35,6 +49,7 @@ var entries = []Entry{
 	{Code: "DSD-003", Title: "Bitnami image", Severity: SeverityBitnami},
 	{Code: "DSD-004", Title: "Bitnami chart source", Severity: SeverityBitnami},
 	{Code: "DSD-005", Title: "Unresolved templated image", Severity: SeverityBitnami},
+	{Code: "DSD-006", Title: "Input not scanned completely", Severity: SeverityBitnami},
 }
 
 // List returns the registry in code order.

@@ -23,6 +23,8 @@ jobs:
       - run: go test -race ./...
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # VERIFY: pinned for reproducible CI; update deliberately.
+          version: v2.4.0
       - name: Vulnerability scan
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        # VERIFY: pinned for reproducible CI; update deliberately.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...

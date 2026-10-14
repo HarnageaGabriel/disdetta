@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -15,6 +16,7 @@ func TestScanExitCodes(t *testing.T) {
 		want         int
 	}{
 		{"findings", "docs/diagnostics/README.md", []string{"scan", filepath.Join("..", "..", "testdata", "repos", "helm")}, ExitFindings},
+		{"diagnostics", "review finding 3", []string{"scan", writeMalformedYAML(t)}, ExitFindings},
 		{"usage", "docs/diagnostics/README.md", []string{"scan", "--format", "xml"}, ExitError},
 		{"version", "M0 CLI milestone", []string{"version"}, ExitOK},
 	}
@@ -28,4 +30,13 @@ func TestScanExitCodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeMalformedYAML(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bad.yaml")
+	if err := os.WriteFile(path, []byte("image: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

@@ -4,7 +4,6 @@ package detect
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"strings"
 
@@ -13,15 +12,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	maxYAMLDepth      = 100
+	maxDockerfileLine = 1024 * 1024
+)
+
 var statefulNames = map[string]bool{
 	"postgresql": true, "redis": true, "valkey": true, "kafka": true,
 	"mongodb": true, "keycloak": true,
 }
 
 // YAML inspects all YAML documents in data and retains yaml.Node line numbers.
-func YAML(path string, data []byte) ([]diag.Diagnostic, error) {
+func YAML(path string, data []byte) diag.Report {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	var findings []diag.Diagnostic
+	var result diag.Report
 	for {
 		var document yaml.Node
 		err := decoder.Decode(&document)
@@ -29,32 +33,56 @@ func YAML(path string, data []byte) ([]diag.Diagnostic, error) {
 			if err == io.EOF {
 				break
 			}
-			return nil, fmt.Errorf("parse %s: %w", path, err)
+			result.Diagnostics = append(result.Diagnostics, scanDiagnostic(path, 0, "malformed YAML: "+err.Error()))
+			break
 		}
 		if len(document.Content) == 0 {
 			continue
 		}
-		globalRegistry := findString(document.Content[0], []string{"global", "imageRegistry"})
-		walkYAML(path, document.Content[0], nil, globalRegistry, 0, &findings)
+		root := document.Content[0]
+		globalRegistry := findString(root, []string{"global", "imageRegistry"})
+		state := yamlWalkState{path: path, globalRegistry: globalRegistry, secret: strings.EqualFold(findString(root, []string{"kind"}), "Secret"), result: &result}
+		state.walk(root, 0, 0)
 	}
-	return findings, nil
+	return result
 }
 
-func walkYAML(path string, node *yaml.Node, keys []string, globalRegistry string, lineOffset int, findings *[]diag.Diagnostic) {
+type yamlWalkState struct {
+	path           string
+	keys           []string
+	globalRegistry string
+	secret         bool
+	depthReported  bool
+	result         *diag.Report
+}
+
+func (s *yamlWalkState) walk(node *yaml.Node, lineOffset, depth int) {
+	if depth > maxYAMLDepth {
+		if !s.depthReported {
+			s.result.Diagnostics = append(s.result.Diagnostics, scanDiagnostic(s.path, node.Line+lineOffset, "YAML nesting exceeds depth limit"))
+			s.depthReported = true
+		}
+		return
+	}
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key, value := node.Content[i], node.Content[i+1]
-			current := appendPath(keys, key.Value)
-			if pathEnds(current, "global", "security", "allowInsecureImages") && value.Value == "true" {
-				*findings = append(*findings, finding("DSD-001", diag.SeverityAllowInsecure, "allowInsecureImages is enabled", "true", "configuration", path, value.Line+lineOffset, false))
+			s.keys = append(s.keys, key.Value)
+			if s.secret && len(s.keys) == 1 && (key.Value == "data" || key.Value == "stringData") {
+				s.keys = s.keys[:len(s.keys)-1]
+				continue
+			}
+			var enabled bool
+			if pathEnds(s.keys, "global", "security", "allowInsecureImages") && value.Tag == "!!bool" && value.Decode(&enabled) == nil && enabled {
+				s.result.Findings = append(s.result.Findings, finding("DSD-001", diag.SeverityAllowInsecure, "allowInsecureImages is enabled", "true", "configuration", s.path, value.Line+lineOffset, false))
 			}
 			if key.Value == "image" {
 				if value.Kind == yaml.ScalarNode {
-					addImage(path, value.Value, value.Line+lineOffset, findings)
+					addImage(s.path, value.Value, value.Line+lineOffset, &s.result.Findings)
 				} else if value.Kind == yaml.MappingNode {
 					registry := mappingString(value, "registry")
 					if registry == "" {
-						registry = globalRegistry
+						registry = s.globalRegistry
 					}
 					repository := mappingString(value, "repository")
 					tag := mappingString(value, "tag")
@@ -64,35 +92,39 @@ func walkYAML(path string, node *yaml.Node, keys []string, globalRegistry string
 						if digest != "" {
 							ref = imageref.Parse(ref.Original + "@" + digest)
 						}
-						addReference(path, ref, mappingLine(value, "repository")+lineOffset, findings)
+						addReference(s.path, ref, mappingLine(value, "repository")+lineOffset, &s.result.Findings)
 					}
 				}
 			}
 			if (key.Value == "repository" || key.Value == "url" || key.Value == "repoURL") && value.Kind == yaml.ScalarNode && isBitnamiChartSource(value.Value) {
-				*findings = append(*findings, finding("DSD-004", diag.SeverityBitnami, "Bitnami chart source", value.Value, "chart", path, value.Line+lineOffset, false))
+				s.result.Findings = append(s.result.Findings, finding("DSD-004", diag.SeverityBitnami, "Bitnami chart source", value.Value, "chart", s.path, value.Line+lineOffset, false))
 			}
 			if key.Value == "uses" && value.Kind == yaml.ScalarNode && strings.HasPrefix(value.Value, "docker://") {
-				addImage(path, strings.TrimPrefix(value.Value, "docker://"), value.Line+lineOffset, findings)
+				addImage(s.path, strings.TrimPrefix(value.Value, "docker://"), value.Line+lineOffset, &s.result.Findings)
 			}
 			if key.Value == "values" && value.Kind == yaml.ScalarNode && strings.TrimSpace(value.Value) != "" {
 				var embedded yaml.Node
-				if err := yaml.Unmarshal([]byte(value.Value), &embedded); err == nil && len(embedded.Content) > 0 {
-					walkYAML(path, embedded.Content[0], current, globalRegistry, value.Line+lineOffset-1, findings)
+				if err := yaml.Unmarshal([]byte(value.Value), &embedded); err != nil {
+					s.result.Diagnostics = append(s.result.Diagnostics, scanDiagnostic(s.path, value.Line+lineOffset+1, "malformed embedded helm.values YAML: "+err.Error()))
+				} else if len(embedded.Content) > 0 {
+					s.walk(embedded.Content[0], value.Line+lineOffset, depth+1)
 				}
 			}
-			walkYAML(path, value, current, globalRegistry, lineOffset, findings)
+			s.walk(value, lineOffset, depth+1)
+			s.keys = s.keys[:len(s.keys)-1]
 		}
 		return
 	}
 	for _, child := range node.Content {
-		walkYAML(path, child, keys, globalRegistry, lineOffset, findings)
+		s.walk(child, lineOffset, depth+1)
 	}
 }
 
 // Dockerfile detects image references in FROM instructions, including flags and aliases.
-func Dockerfile(path string, data []byte) []diag.Diagnostic {
-	var findings []diag.Diagnostic
+func Dockerfile(path string, data []byte) diag.Report {
+	var result diag.Report
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 64*1024), maxDockerfileLine)
 	line := 0
 	for scanner.Scan() {
 		line++
@@ -105,10 +137,13 @@ func Dockerfile(path string, data []byte) []diag.Diagnostic {
 			index++
 		}
 		if index < len(fields) {
-			addImage(path, fields[index], line, &findings)
+			addImage(path, fields[index], line, &result.Findings)
 		}
 	}
-	return findings
+	if err := scanner.Err(); err != nil {
+		result.Diagnostics = append(result.Diagnostics, scanDiagnostic(path, line+1, "Dockerfile scan failed: "+err.Error()))
+	}
+	return result
 }
 
 func addImage(path, value string, line int, findings *[]diag.Diagnostic) {
@@ -189,13 +224,6 @@ func findString(node *yaml.Node, path []string) string {
 	return ""
 }
 
-func appendPath(path []string, key string) []string {
-	result := make([]string, len(path)+1)
-	copy(result, path)
-	result[len(path)] = key
-	return result
-}
-
 func pathEnds(path []string, suffix ...string) bool {
 	if len(path) < len(suffix) {
 		return false
@@ -206,4 +234,8 @@ func pathEnds(path []string, suffix ...string) bool {
 		}
 	}
 	return true
+}
+
+func scanDiagnostic(path string, line int, message string) diag.ScanDiagnostic {
+	return diag.ScanDiagnostic{Code: "DSD-006", Message: message, Path: path, Line: line}
 }

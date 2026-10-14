@@ -8,7 +8,7 @@
       "reference": "docker.io/bitnamilegacy/redis:7",
       "classification": "bitnamilegacy",
       "path": "application.yaml",
-      "line": 11,
+      "line": 12,
       "stateful": true
     },
     {
@@ -31,5 +31,6 @@
       "line": 17,
       "stateful": false
     }
-  ]
+  ],
+  "diagnostics": []
 }

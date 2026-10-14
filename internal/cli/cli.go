@@ -79,19 +79,19 @@ func newScanCmd(streams IO) *cobra.Command {
 			if len(args) == 1 {
 				path = args[0]
 			}
-			findings, err := repo.Scan(cmd.Context(), path)
+			result, err := repo.Scan(cmd.Context(), path)
 			if err != nil {
 				return &exitError{code: ExitError, err: err}
 			}
 			if format == "json" {
-				err = report.JSON(streams.Out, findings)
+				err = report.JSON(streams.Out, result)
 			} else {
-				err = report.Table(streams.Out, findings)
+				err = report.Table(streams.Out, result)
 			}
 			if err != nil {
 				return &exitError{code: ExitError, err: fmt.Errorf("write report: %w", err)}
 			}
-			if len(findings) > 0 {
+			if len(result.Findings) > 0 || len(result.Diagnostics) > 0 {
 				return &exitError{code: ExitFindings}
 			}
 			return nil
