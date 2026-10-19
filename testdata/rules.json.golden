@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "1",
+  "rules": [
+    {
+      "code": "DSD-CFG-001",
+      "kind": "rule",
+      "severity": "high",
+      "level": "",
+      "title": "allowInsecureImages is enabled",
+      "oneLiner": "Image verification is disabled by allowInsecureImages.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CFG-001.md"
+    },
+    {
+      "code": "DSD-CHT-001",
+      "kind": "rule",
+      "severity": "medium",
+      "level": "",
+      "title": "Bitnami chart source",
+      "oneLiner": "The chart is sourced from a Bitnami chart repository.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CHT-001.md"
+    },
+    {
+      "code": "DSD-CHT-002",
+      "kind": "rule",
+      "severity": "medium",
+      "level": "",
+      "title": "Vendored Bitnami chart",
+      "oneLiner": "A vendored Bitnami chart pins its images.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CHT-002.md"
+    },
+    {
+      "code": "DSD-IMG-001",
+      "kind": "rule",
+      "severity": "high",
+      "level": "",
+      "title": "Bitnami legacy image",
+      "oneLiner": "The frozen Bitnamilegacy image has no security updates.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-001.md"
+    },
+    {
+      "code": "DSD-IMG-002",
+      "kind": "rule",
+      "severity": "high",
+      "level": "",
+      "title": "Versioned Bitnami image",
+      "oneLiner": "A versioned Bitnami image may no longer pull from the public path.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-002.md"
+    },
+    {
+      "code": "DSD-IMG-003",
+      "kind": "rule",
+      "severity": "medium",
+      "level": "",
+      "title": "Community Bitnami image",
+      "oneLiner": "A community-tier Bitnami image is intended for development.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-003.md"
+    },
+    {
+      "code": "DSD-IMG-004",
+      "kind": "rule",
+      "severity": "low",
+      "level": "",
+      "title": "Bitnami image from another registry",
+      "oneLiner": "The Bitnami image is mirrored or rebuilt outside Docker Hub.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-004.md"
+    },
+    {
+      "code": "DSD-SCN-001",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "error",
+      "title": "Malformed file",
+      "oneLiner": "The file could not be parsed.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-001.md"
+    },
+    {
+      "code": "DSD-SCN-002",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "warning",
+      "title": "File skipped",
+      "oneLiner": "The path was skipped because it is not a regular file.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-002.md"
+    },
+    {
+      "code": "DSD-SCN-003",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "info",
+      "title": "Unresolved reference",
+      "oneLiner": "A templated reference has no static Bitnami evidence.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-003.md"
+    },
+    {
+      "code": "DSD-SCN-004",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "error",
+      "title": "Read error",
+      "oneLiner": "The path could not be read.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-004.md"
+    },
+    {
+      "code": "DSD-SCN-005",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "warning",
+      "title": "Limit reached",
+      "oneLiner": "A scanner safety limit was reached.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-005.md"
+    },
+    {
+      "code": "DSD-SCN-006",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "warning",
+      "title": "Ignore entry expired",
+      "oneLiner": "The ignore entry has expired.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-006.md"
+    },
+    {
+      "code": "DSD-SCN-007",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "info",
+      "title": "Template text scanned line by line",
+      "oneLiner": "Template text was scanned line by line.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-007.md"
+    },
+    {
+      "code": "DSD-SCN-008",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "error",
+      "title": "File larger than the size limit",
+      "oneLiner": "The file exceeded the scan size limit.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-008.md"
+    },
+    {
+      "code": "DSD-SCN-009",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "error",
+      "title": "Helm release payload over a cap or not decodable",
+      "oneLiner": "The Helm release payload could not be decoded.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-009.md"
+    },
+    {
+      "code": "DSD-SCN-010",
+      "kind": "diagnostic",
+      "severity": "",
+      "level": "warning",
+      "title": "Cluster list failed",
+      "oneLiner": "A cluster list call failed.",
+      "docs": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-010.md"
+    }
+  ]
+}
