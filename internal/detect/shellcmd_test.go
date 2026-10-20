@@ -3,6 +3,7 @@ package detect
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"gopkg.in/yaml.v3"
@@ -1146,6 +1147,126 @@ func TestDockerfileRunShellCommands(t *testing.T) {
 	negative := Dockerfile("Dockerfile", []byte("RUN docker build -t bitnami/mycustom .\n# RUN docker run bitnami/kubectl:1\n"))
 	if len(negative.Findings) != 0 {
 		t.Fatalf("source docs/spec/v0.1.md section 9.2: %#v", negative)
+	}
+}
+
+// Source: docs/spec/v0.1.md section 9.2: the scan of a CI file is linear in the
+// number of its script steps. A file with 20000 steps is scanned in a fraction
+// of a second: the guard ends the test after 60 seconds, and the budget fails
+// it on a quadratic detector, which needs 15 seconds for the same file.
+func TestShellScanManySteps(t *testing.T) {
+	const steps = 20000
+	tests := []struct {
+		name, path                     string
+		data                           []byte
+		wantFirstLine, wantFirstColumn int
+		wantLastLine                   int
+	}{
+		{
+			name: "github actions steps", path: ".github/workflows/ci.yaml",
+			data:          shellWorkflowSteps(steps),
+			wantFirstLine: 4, wantFirstColumn: 25, wantLastLine: 20003,
+		},
+		{
+			name: "gitlab script lines", path: ".gitlab-ci.yml",
+			data:          shellGitLabScriptLines(steps),
+			wantFirstLine: 3, wantFirstColumn: 18, wantLastLine: 20002,
+		},
+		{
+			name: "azure steps", path: "azure-pipelines.yml",
+			data:          shellAzureSteps(steps),
+			wantFirstLine: 2, wantFirstColumn: 24, wantLastLine: 20001,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			findings, elapsed := scanFileWithin(t, tt.path, tt.data, 60*time.Second)
+			if len(findings) != steps {
+				t.Fatalf("source docs/spec/v0.1.md section 9.2: got %d findings, want %d", len(findings), steps)
+			}
+			first := findings[0]
+			if first.RuleID != "DSD-IMG-002" || first.Location.Line != tt.wantFirstLine || first.Location.Column != tt.wantFirstColumn {
+				t.Fatalf("source docs/spec/v0.1.md section 9.2: got %#v", first)
+			}
+			if last := findings[len(findings)-1]; last.Location.Line != tt.wantLastLine {
+				t.Fatalf("source docs/spec/v0.1.md section 9.2: got %#v", last)
+			}
+			if elapsed > 5*time.Second {
+				t.Fatalf("source docs/spec/v0.1.md section 9.2: the scan of %d steps took %s, want less than 5s", steps, elapsed)
+			}
+			t.Logf("scanned %d steps in %s", steps, elapsed)
+		})
+	}
+}
+
+// scanFileWithin scans one file in a goroutine and returns its findings and
+// the time the scan took. The test fails when the scan does not finish before
+// the guard expires, so a quadratic detector fails instead of running forever.
+func scanFileWithin(t *testing.T, path string, data []byte, guard time.Duration) ([]diag.Finding, time.Duration) {
+	t.Helper()
+	type scanResult struct {
+		findings []diag.Finding
+		elapsed  time.Duration
+	}
+	done := make(chan scanResult, 1)
+	go func() {
+		start := time.Now()
+		findings := YAML(path, data).Findings
+		done <- scanResult{findings: findings, elapsed: time.Since(start)}
+	}()
+	select {
+	case result := <-done:
+		return result.findings, result.elapsed
+	case <-time.After(guard):
+		t.Fatalf("source docs/spec/v0.1.md section 9.2: the scan of %s did not finish in %s", path, guard)
+		return nil, 0
+	}
+}
+
+// shellWorkflowSteps returns a GitHub Actions workflow with the given number
+// of run steps.
+func shellWorkflowSteps(steps int) []byte {
+	var b strings.Builder
+	b.WriteString("jobs:\n  test:\n    steps:\n")
+	for i := 0; i < steps; i++ {
+		b.WriteString("      - run: docker run bitnami/postgresql:14.1.0\n")
+	}
+	return []byte(b.String())
+}
+
+// shellGitLabScriptLines returns a GitLab CI file with the given number of
+// script lines.
+func shellGitLabScriptLines(lines int) []byte {
+	var b strings.Builder
+	b.WriteString("build:\n  script:\n")
+	for i := 0; i < lines; i++ {
+		b.WriteString("    - docker run bitnami/postgresql:14.1.0\n")
+	}
+	return []byte(b.String())
+}
+
+// shellAzureSteps returns an Azure Pipelines file with the given number of
+// steps.
+func shellAzureSteps(steps int) []byte {
+	var b strings.Builder
+	b.WriteString("steps:\n")
+	for i := 0; i < steps; i++ {
+		b.WriteString("  - script: docker run bitnami/postgresql:14.1.0\n")
+	}
+	return []byte(b.String())
+}
+
+// Source: docs/spec/v0.1.md section 9.2: the scan of a CI file stays linear in
+// the number of its script steps.
+func BenchmarkShellScanWorkflowSteps(b *testing.B) {
+	data := shellWorkflowSteps(5000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		got := YAML(".github/workflows/ci.yaml", data)
+		if len(got.Findings) != 5000 {
+			b.Fatalf("source docs/spec/v0.1.md section 9.2: got %d findings, want 5000", len(got.Findings))
+		}
 	}
 }
 
