@@ -1,6 +1,9 @@
 package detect
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -907,4 +910,123 @@ func TestHelmfileConcurrentScans(t *testing.T) {
 	for _, got := range reports {
 		assertHelmfileFindings(t, source, got, want)
 	}
+}
+
+// helmfileFixtureDir is the directory of the real Helmfile fixtures, relative
+// to the directory of this package.
+const helmfileFixtureDir = "../../testdata/repos/helmfile"
+
+// helmfileFixtureSeeds returns the content of the named fixtures. A fixture
+// that is missing is skipped: a seed never fails a target.
+func helmfileFixtureSeeds(names ...string) [][]byte {
+	seeds := make([][]byte, 0, len(names))
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(helmfileFixtureDir, filepath.FromSlash(name)))
+		if err != nil {
+			continue
+		}
+		seeds = append(seeds, data)
+	}
+	return seeds
+}
+
+// helmfileYAMLSeeds are the seeds of the YAML target: the real fixtures of
+// the repository corpus and the shapes the detector must resolve
+// (https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9).
+func helmfileYAMLSeeds() [][]byte {
+	seeds := helmfileFixtureSeeds(
+		"helmfile.yaml",
+		"helmfile.d/duplicate-name.yaml",
+		"helmfile.d/extra.yaml",
+		"helmfile.d/includes.yaml",
+		"helmfile.d/multi-doc.yaml",
+	)
+	return append(seeds,
+		// A release declared before the repositories of the file.
+		[]byte("releases:\n  - name: db\n    chart: bitnami/postgresql\nrepositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n"),
+		// Several documents in one file.
+		[]byte("releases:\n  - name: db\n    chart: bitnami/postgresql\n---\nrepositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n---\nreleases:\n  - name: cache\n    chart: bitnami/redis\n"),
+		// The same repository name declared twice.
+		[]byte("repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n  - name: bitnami\n    url: https://charts.example.com/stable\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n"),
+		// An OCI repository and a chart naming the OCI repository directly.
+		[]byte("repositories:\n  - name: oci\n    url: registry-1.docker.io/bitnamicharts\n    oci: true\nreleases:\n  - name: cache\n    chart: oci/redis\n  - name: direct\n    chart: oci://registry-1.docker.io/bitnamicharts/nginx\n"),
+		// Templated values.
+		[]byte("repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n    values:\n      - image:\n          repository: \"{{ .Values.image }}\"\n"),
+	)
+}
+
+// helmfileGotmplSeeds are the seeds of the gotmpl target: the real fixture
+// of the repository corpus and the shapes of a template file
+// (https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9.1).
+func helmfileGotmplSeeds() [][]byte {
+	seeds := helmfileFixtureSeeds("helmfile.yaml.gotmpl")
+	return append(seeds,
+		// A list written at column zero.
+		[]byte("repositories:\n- name: bitnami\n  url: https://charts.bitnami.com/bitnami\nreleases:\n- name: db\n  chart: bitnami/postgresql\n"),
+		// A comment on one line and a comment on several lines.
+		[]byte("repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n{{/* chart: bitnami/redis */}}\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n"),
+		[]byte("repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n{{/*\nreleases:\n  - name: fake\n    chart: bitnami/redis\n*/}}\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n"),
+		// Template action lines.
+		[]byte("repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n{{- if .Values.extra }}\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n{{- range .Values.items }}\n{{- end }}\n{{- end }}\n"),
+		// A chart key nested under the values of a release.
+		[]byte("repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n    values:\n      - some:\n          chart: bitnami/redis\n"),
+		// Windows line endings.
+		[]byte("repositories:\r\n  - name: bitnami\r\n    url: https://charts.bitnami.com/bitnami\r\nreleases:\r\n  - name: db\r\n    chart: bitnami/postgresql\r\n"),
+	)
+}
+
+// helmfileFindingsPerLine is the number of findings a Helmfile input may
+// produce per input line, and helmfileFindingsHead the fixed head count.
+const (
+	helmfileFindingsPerLine = 20
+	helmfileFindingsHead    = 10
+)
+
+// assertHelmfileFuzzReport checks the invariants of a Helmfile scan: the
+// scan never panics, two scans of the same input give the same report, every
+// finding has a one-based position in the file that was scanned, and the
+// number of findings stays proportional to the size of the input.
+func assertHelmfileFuzzReport(t *testing.T, path string, data []byte, scan func(string, []byte) diag.Report) {
+	t.Helper()
+	first := scan(path, data)
+	second := scan(path, data)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("scan of %s is not deterministic:\nfirst:  %#v\nsecond: %#v", path, first.Findings, second.Findings)
+	}
+	lines := strings.Count(string(data), "\n") + 1
+	limit := helmfileFindingsPerLine*lines + helmfileFindingsHead
+	if len(first.Findings) > limit {
+		t.Fatalf("scan of %s produced %d findings, more than the %d allowed", path, len(first.Findings), limit)
+	}
+	for _, finding := range first.Findings {
+		if finding.Location.Line < 1 || finding.Location.Column < 1 {
+			t.Fatalf("finding has an invalid position: %#v", finding)
+		}
+		if finding.Location.Path != path {
+			t.Fatalf("finding has path %q, want %q: %#v", finding.Location.Path, path, finding)
+		}
+	}
+}
+
+// FuzzHelmfileYAML fuzzes the Helmfile YAML detector: the entry point the
+// repository scanner uses for helmfile.yaml, helmfile.yml and
+// helmfile.d/*.yaml (spec section 9).
+func FuzzHelmfileYAML(f *testing.F) {
+	for _, seed := range helmfileYAMLSeeds() {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		assertHelmfileFuzzReport(t, "helmfile.yaml", data, YAML)
+	})
+}
+
+// FuzzHelmfileGotmpl fuzzes the Helmfile template detector: the entry point
+// the repository scanner uses for helmfile.yaml.gotmpl (spec section 9.1).
+func FuzzHelmfileGotmpl(f *testing.F) {
+	for _, seed := range helmfileGotmplSeeds() {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		assertHelmfileFuzzReport(t, "helmfile.yaml.gotmpl", data, Template)
+	})
 }
