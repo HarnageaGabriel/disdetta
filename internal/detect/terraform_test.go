@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 )
@@ -637,9 +638,129 @@ func TestTerraformEmbeddedValuesDepthLimit(t *testing.T) {
 	}
 }
 
+// terraformHeredocSource returns a Terraform file whose values attribute
+// holds a heredoc body of the given number of lines.
+func terraformHeredocSource(lines int) string {
+	var b strings.Builder
+	b.WriteString("resource \"helm_release\" \"db\" {\n  values = [<<-EOT\n")
+	for i := 0; i < lines; i++ {
+		b.WriteString("    image: bitnami/postgresql:14.1.0\n")
+	}
+	b.WriteString("  EOT\n  ]\n}\n")
+	return b.String()
+}
+
+// TestTerraformHeredocBelowLimit checks that a heredoc body below the limit
+// is scanned: every image of the embedded values is reported, and the scan
+// finishes well inside the timeout (spec section 3).
+func TestTerraformHeredocBelowLimit(t *testing.T) {
+	const lines = 19000
+	source := terraformHeredocSource(lines)
+	done := make(chan diag.Report, 1)
+	go func() { done <- Terraform("main.tf", []byte(source)) }()
+	select {
+	case got := <-done:
+		if len(got.Diagnostics) != 0 {
+			t.Fatalf("source docs/spec/v0.1.md section 3: got diagnostics %+v, want none", got.Diagnostics)
+		}
+		if len(got.Findings) != lines {
+			t.Fatalf("source docs/spec/v0.1.md section 3: got %d findings, want %d", len(got.Findings), lines)
+		}
+		for _, finding := range got.Findings {
+			if finding.RuleID != "DSD-IMG-002" {
+				t.Fatalf("source docs/spec/v0.1.md section 3: got rule %s, want DSD-IMG-002", finding.RuleID)
+			}
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatalf("source docs/spec/v0.1.md section 3: the scan of a heredoc of %d lines did not finish in 60 seconds", lines)
+	}
+}
+
+// TestTerraformHeredocTooLarge checks that a heredoc body above the limit is
+// not parsed: the file is reported once as DSD-SCN-005 and not scanned
+// (spec section 3).
+func TestTerraformHeredocTooLarge(t *testing.T) {
+	source := terraformHeredocSource(MaxTerraformHeredocLines + 5000)
+	got := Terraform("main.tf", []byte(source))
+	if len(got.Findings) != 0 {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got findings %+v, want none", got.Findings)
+	}
+	if len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "DSD-SCN-005" {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got diagnostics %+v, want one DSD-SCN-005", got.Diagnostics)
+	}
+	if got.Diagnostics[0].Message != "limit reached: Terraform heredoc or file too large" {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got message %q, want the size limit", got.Diagnostics[0].Message)
+	}
+}
+
+// TestTerraformFileTooLarge checks that a file with more lines than the
+// limit is not parsed: it is reported once as DSD-SCN-005 (spec section 3).
+func TestTerraformFileTooLarge(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i <= MaxTerraformLines; i++ {
+		b.WriteString("# a comment\n")
+	}
+	got := Terraform("main.tf", []byte(b.String()))
+	if len(got.Findings) != 0 {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got findings %+v, want none", got.Findings)
+	}
+	if len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "DSD-SCN-005" {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got diagnostics %+v, want one DSD-SCN-005", got.Diagnostics)
+	}
+	if got.Diagnostics[0].Message != "limit reached: Terraform heredoc or file too large" {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got message %q, want the size limit", got.Diagnostics[0].Message)
+	}
+}
+
+// TestTerraformRawScan checks the raw scan of the bytes of a Terraform file:
+// the lines of the file, the lines of a heredoc body and the nesting of the
+// expressions (spec section 3).
+func TestTerraformRawScan(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		lines   int
+		heredoc int
+		depth   int
+	}{
+		{name: "plain file", input: "resource \"a\" \"b\" {\n  x = 1\n}\n", lines: 3, depth: 1},
+		{name: "heredoc body", input: "x = <<EOF\nbody\nEOF\n", lines: 3, heredoc: 1},
+		{name: "flush heredoc body", input: "x = <<-EOF\n  body\n  EOF\n", lines: 3, heredoc: 1},
+		{name: "unterminated heredoc", input: "x = <<EOF\nbody\nbody\n", lines: 3, heredoc: 2},
+		{name: "heredoc in a string", input: "x = \"<<EOF\"\n", lines: 1},
+		{name: "heredoc in a comment", input: "# <<EOF\nx = 1\n", lines: 2},
+		{name: "nested braces", input: "x = {a = {b = 1}}\n", lines: 1, depth: 2},
+		{name: "nested list", input: "x = [[1]]\n", lines: 1, depth: 2},
+		{name: "interpolation", input: "x = \"${var.a}\"\n", lines: 1, depth: 1},
+		{name: "interpolation in a heredoc", input: "x = <<EOF\n${var.a}\nEOF\n", lines: 3, heredoc: 1, depth: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := terraformScanRaw([]byte(tt.input))
+			if got.lines != tt.lines || got.heredoc != tt.heredoc || got.depth != tt.depth {
+				t.Fatalf("source docs/spec/v0.1.md section 3: got lines %d heredoc %d depth %d, want %d %d %d",
+					got.lines, got.heredoc, got.depth, tt.lines, tt.heredoc, tt.depth)
+			}
+		})
+	}
+}
+
+// TestTerraformParseDepthLimit checks that a file nested deeper than the
+// parser may recurse is not parsed at all: it is reported once as
+// DSD-SCN-005 and the parser never overflows its stack (spec section 3).
+func TestTerraformParseDepthLimit(t *testing.T) {
+	deep := strings.Repeat("{a=", maxTerraformParseDepth+2) + "1" + strings.Repeat("}", maxTerraformParseDepth+2)
+	got := Terraform("main.tf", []byte("resource \"helm_release\" \"db\" { values = "+deep+" }"))
+	if len(got.Findings) != 0 || len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "DSD-SCN-005" {
+		t.Fatalf("source docs/spec/v0.1.md section 3: %#v", got)
+	}
+}
+
 func FuzzTerraform(f *testing.F) {
 	f.Add([]byte(`resource "helm_release" "db" { values = [yamlencode({ image = { repository = "bitnami/redis" } })] }`))
 	f.Add([]byte{0xff, 0x00, 0x7b})
+	f.Add([]byte("resource \"helm_release\" \"db\" {\n  values = [<<EOF\nimage: bitnami/redis\n"))
+	f.Add([]byte("resource \"helm_release\" \"db\" {\n  values = [<<EOF\n  nested: <<EOF\n  EOF\nEOF\n]\n}\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) > maxTerraformBytes {
 			return

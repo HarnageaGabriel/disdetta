@@ -720,9 +720,24 @@ The second line comes from the Helm release Secret, so it needs tier 3.
 The contract is [docs/spec/v0.2-cluster.md](../spec/v0.2-cluster.md) and the
 permissions are in [docs/cluster-rbac.md](../cluster-rbac.md).
 
+## Limits
+
+The scan of a hostile repository is bounded. A file larger than 16 MiB is not
+scanned and the scan is incomplete (`DSD-SCN-008`). The YAML nesting depth is
+256 levels and the alias expansion budget is 10000 nodes (`DSD-SCN-005`). A
+Dockerfile instruction holds at most 10000 continuation lines. One file
+reports at most 10000 findings and one repository scan at most 100000
+(`DSD-SCN-005`). The time of a scan is linear in the number of YAML
+documents, CI script steps and Dockerfile continuation lines it reads. The
+full table of the limits, the cost of the worst cases and the threats they
+answer are in [docs/performance.md](../performance.md) and in
+[docs/threat-model.md](../threat-model.md).
+
 ## Related pages
 
 - [SARIF output](sarif.md)
 - [Rules command](rules.md)
 - [`plan`](plan.md)
 - [Findings and scan diagnostics](../diagnostics/README.md)
+- [Performance and limits](../performance.md)
+- [Threat model](../threat-model.md)
