@@ -1,0 +1,561 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "disdetta",
+          "version": "dev",
+          "informationUri": "https://github.com/HarnageaGabriel/disdetta",
+          "rules": [
+            {
+              "id": "DSD-CFG-001",
+              "name": "allowinsecureimages-is-enabled",
+              "shortDescription": {
+                "text": "allowInsecureImages is enabled"
+              },
+              "fullDescription": {
+                "text": "Image verification is disabled by allowInsecureImages."
+              },
+              "helpUri": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CFG-001.md",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "bitnami",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "DSD-CHT-001",
+              "name": "bitnami-chart-source",
+              "shortDescription": {
+                "text": "Bitnami chart source"
+              },
+              "fullDescription": {
+                "text": "The chart is sourced from a Bitnami chart repository."
+              },
+              "helpUri": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CHT-001.md",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "bitnami",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "DSD-CHT-002",
+              "name": "vendored-bitnami-chart",
+              "shortDescription": {
+                "text": "Vendored Bitnami chart"
+              },
+              "fullDescription": {
+                "text": "A vendored Bitnami chart pins its images."
+              },
+              "helpUri": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CHT-002.md",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "bitnami",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "DSD-IMG-001",
+              "name": "bitnami-legacy-image",
+              "shortDescription": {
+                "text": "Bitnami legacy image"
+              },
+              "fullDescription": {
+                "text": "The frozen Bitnamilegacy image has no security updates."
+              },
+              "helpUri": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-001.md",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "bitnami",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "DSD-IMG-002",
+              "name": "versioned-bitnami-image",
+              "shortDescription": {
+                "text": "Versioned Bitnami image"
+              },
+              "fullDescription": {
+                "text": "A versioned Bitnami image may no longer pull from the public path."
+              },
+              "helpUri": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-002.md",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "bitnami",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "DSD-IMG-003",
+              "name": "community-bitnami-image",
+              "shortDescription": {
+                "text": "Community Bitnami image"
+              },
+              "fullDescription": {
+                "text": "A community-tier Bitnami image is intended for development."
+              },
+              "helpUri": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-003.md",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "bitnami",
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "DSD-IMG-004",
+              "name": "bitnami-image-from-another-registry",
+              "shortDescription": {
+                "text": "Bitnami image from another registry"
+              },
+              "fullDescription": {
+                "text": "The Bitnami image is mirrored or rebuilt outside Docker Hub."
+              },
+              "helpUri": "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-004.md",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "tags": [
+                  "bitnami",
+                  "security"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "exitCode": 1,
+          "toolExecutionNotifications": [],
+          "properties": {
+            "ignored": 0
+          }
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "DSD-IMG-002",
+          "ruleIndex": 4,
+          "level": "error",
+          "message": {
+            "text": "A versioned Bitnami image may no longer pull from the public path. Reference: docker.io/bitnami/redis:7.2.4"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/Pod/cache-0",
+                 "kind": "Pod"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "e744bc16fe8c4c1b"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "high",
+            "component": "redis",
+            "attributes": [
+              "mirror",
+              "pull-risk"
+            ]
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-002",
+          "ruleIndex": 4,
+          "level": "error",
+          "message": {
+            "text": "A versioned Bitnami image may no longer pull from the public path. Reference: docker.io/bitnami/redis:7.2.4"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/ReplicaSet/standalone-rs",
+                 "kind": "ReplicaSet"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "689bce2c0ad6a30f"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "high",
+            "component": "redis",
+            "attributes": [
+              "pull-risk"
+            ]
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-001",
+          "ruleIndex": 3,
+          "level": "error",
+          "message": {
+            "text": "The frozen Bitnamilegacy image has no security updates. Reference: docker.io/bitnamilegacy/postgresql:16.4.0"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/Secret/pg",
+                 "kind": "Secret"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "c803dd4a535cde99"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "high",
+            "component": "postgresql",
+            "attributes": []
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-002",
+          "ruleIndex": 4,
+          "level": "error",
+          "message": {
+            "text": "A versioned Bitnami image may no longer pull from the public path. Reference: docker.io/bitnami/postgresql:16.4.0-debian-12-r2"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/StatefulSet/pg",
+                 "kind": "StatefulSet"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "4a6320706fe8f092"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "high",
+            "component": "postgresql",
+            "attributes": [
+              "pull-risk"
+            ]
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-001",
+          "ruleIndex": 3,
+          "level": "error",
+          "message": {
+            "text": "The frozen Bitnamilegacy image has no security updates. Reference: docker.io/bitnamilegacy/kubectl:1.29"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/Job/migrate",
+                 "kind": "Job"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "92ac16b16c60be83"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "low",
+            "component": "kubectl",
+            "attributes": []
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-002",
+          "ruleIndex": 4,
+          "level": "error",
+          "message": {
+            "text": "A versioned Bitnami image may no longer pull from the public path. Reference: docker.io/bitnami/os-shell:12"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/StatefulSet/pg",
+                 "kind": "StatefulSet"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "4e8bda2593f3f4c9"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "low",
+            "component": "os-shell",
+            "attributes": [
+              "pull-risk"
+            ]
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-001",
+          "ruleIndex": 3,
+          "level": "error",
+          "message": {
+            "text": "The frozen Bitnamilegacy image has no security updates. Reference: docker.io/bitnamilegacy/kubectl:1.29"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/shop/Deployment/web",
+                 "kind": "Deployment"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "bbb0cb648514904f"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "low",
+            "component": "kubectl",
+            "attributes": []
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-001",
+          "ruleIndex": 3,
+          "level": "error",
+          "message": {
+            "text": "The frozen Bitnamilegacy image has no security updates. Reference: docker.io/bitnamilegacy/os-shell:1"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/shop/Deployment/web",
+                 "kind": "Deployment"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "bcd02c242b9023e6"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "low",
+            "component": "os-shell",
+            "attributes": []
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-002",
+          "ruleIndex": 4,
+          "level": "error",
+          "message": {
+            "text": "A versioned Bitnami image may no longer pull from the public path. Reference: docker.io/bitnami/nginx:1.25.3"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/shop/Deployment/web",
+                 "kind": "Deployment"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "a896478c6e180674"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "low",
+            "component": "nginx",
+            "attributes": [
+              "pull-risk"
+            ]
+          }
+        },
+        {
+          "ruleId": "DSD-CFG-001",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Image verification is disabled by allowInsecureImages. Reference: true"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/Secret/pg",
+                 "kind": "Secret"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "8a7cd1873be08a10"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "unknown",
+            "component": "",
+            "attributes": []
+          }
+        },
+        {
+          "ruleId": "DSD-CHT-002",
+          "ruleIndex": 2,
+          "level": "warning",
+          "message": {
+            "text": "A vendored Bitnami chart pins its images. Reference: https://github.com/bitnami/charts/tree/main/bitnami/postgresql"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/Secret/pg",
+                 "kind": "Secret"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "8b8233a98e32df7c"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "high",
+            "component": "postgresql",
+            "attributes": [
+              "chart"
+            ]
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-003",
+          "ruleIndex": 5,
+          "level": "warning",
+          "message": {
+            "text": "A community-tier Bitnami image is intended for development. Reference: docker.io/bitnami/kubectl:latest"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/CronJob/nightly",
+                 "kind": "CronJob"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "1dae3b56921a54ae"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "low",
+            "component": "kubectl",
+            "attributes": []
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-003",
+          "ruleIndex": 5,
+          "level": "warning",
+          "message": {
+            "text": "A community-tier Bitnami image is intended for development. Reference: docker.io/bitnamisecure/nginx:latest"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/kube-system/DaemonSet/agent",
+                 "kind": "DaemonSet"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "87eb15629b989ae7"
+          },
+          "properties": {
+            "confidence": "confirmed",
+            "impact": "low",
+            "component": "nginx",
+            "attributes": []
+          }
+        },
+        {
+          "ruleId": "DSD-IMG-004",
+          "ruleIndex": 6,
+          "level": "note",
+          "message": {
+            "text": "The Bitnami image is mirrored or rebuilt outside Docker Hub. Reference: registry.example.com/bitnami/postgresql:16.4.0"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                 "fullyQualifiedName": "cluster/db/Pod/pg-0",
+                 "kind": "Pod"
+              }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "disdettaFingerprint/v1": "4e7cec40ac90e20f"
+          },
+          "properties": {
+            "confidence": "inferred",
+            "impact": "high",
+            "component": "postgresql",
+            "attributes": [
+              "mirror"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
