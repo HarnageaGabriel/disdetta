@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"github.com/HarnageaGabriel/disdetta/internal/report"
@@ -35,6 +37,43 @@ func scanJSON(t *testing.T, root, workers string) []byte {
 		t.Fatal(err)
 	}
 	return out.Bytes()
+}
+
+// scanJSONWithOptions scans the root with the given options and returns the
+// JSON report.
+func scanJSONWithOptions(t *testing.T, root string, options repo.Options) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	if err := report.JSON(&out, scanWithTimeout(t, root, options)); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+// scanWithTimeout scans the root with the given options and fails the test
+// if the scan does not finish in time, so a deadlock fails the test instead
+// of hanging it.
+func scanWithTimeout(t *testing.T, root string, options repo.Options) diag.Report {
+	t.Helper()
+	type outcome struct {
+		report diag.Report
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		report, err := repo.ScanWithOptions(context.Background(), root, options)
+		done <- outcome{report: report, err: err}
+	}()
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		return result.report
+	case <-time.After(30 * time.Second):
+		t.Fatal("the scan did not finish in time")
+		return diag.Report{}
+	}
 }
 
 // fixtureRoots returns the scan root of every fixture repository.
@@ -110,11 +149,11 @@ func TestScanIsIdenticalForEveryWorkerCount(t *testing.T) {
 	}
 }
 
-// TestScanLimitsAreAppliedInWalkOrder covers the scan limits: the decision to
-// scan a file is taken from the metadata the walk collected, in walk order,
-// before the file is handed to a worker. The files above the size limit are
-// skipped and reported in walk order, whatever the number of workers.
-func TestScanLimitsAreAppliedInWalkOrder(t *testing.T) {
+// TestPerFileOversizeDiagnosticsKeepWalkOrder checks the per file size limit:
+// a file above the limit is skipped and reported with DSD-SCN-008, in walk
+// order, even when the workers finish the files in the reverse order. The
+// scanner has no aggregate limit: only the per file limit of 16 MiB applies.
+func TestPerFileOversizeDiagnosticsKeepWalkOrder(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel string, content []byte) {
 		path := filepath.Join(root, filepath.FromSlash(rel))
@@ -129,12 +168,50 @@ func TestScanLimitsAreAppliedInWalkOrder(t *testing.T) {
 	write("10-oversized.yaml", make([]byte, repo.MaxFileSize+1))
 	write("20-values.yaml", []byte("image: bitnami/postgresql:15\n"))
 	write("30-oversized.yaml", make([]byte, repo.MaxFileSize+1))
-	sequential := scanJSON(t, root, "1")
-	parallel := scanJSON(t, root, "8")
-	if !bytes.Equal(sequential, parallel) {
-		t.Fatalf("the report with 8 workers differs from the sequential report:\nsequential:\n%s\nparallel:\n%s", sequential, parallel)
+	// The hook holds every file until the next one is done, so the workers
+	// finish the files in the reverse of the walk order.
+	gates := make([]chan struct{}, 4)
+	for i := range gates {
+		gates[i] = make(chan struct{}, 1)
 	}
-	got := scanReport(t, root, "8")
+	var mu sync.Mutex
+	var finished []int
+	options := repo.Options{JobHook: func(index int, scan func() diag.Report) diag.Report {
+		if index+1 < len(gates) {
+			<-gates[index+1]
+		}
+		parsed := scan()
+		mu.Lock()
+		finished = append(finished, index)
+		mu.Unlock()
+		if index < len(gates) {
+			gates[index] <- struct{}{}
+		}
+		return parsed
+	}}
+	t.Setenv(repo.WorkersEnv, "1")
+	sequential := scanJSONWithOptions(t, root, repo.Options{})
+	t.Setenv(repo.WorkersEnv, "8")
+	got := scanWithTimeout(t, root, options)
+	mu.Lock()
+	order := append([]int(nil), finished...)
+	mu.Unlock()
+	wantOrder := []int{3, 2, 1, 0}
+	if len(order) != len(wantOrder) {
+		t.Fatalf("%d files were parsed, want %d", len(order), len(wantOrder))
+	}
+	for i := range wantOrder {
+		if order[i] != wantOrder[i] {
+			t.Fatalf("the files finished in the order %v, want %v", order, wantOrder)
+		}
+	}
+	var out bytes.Buffer
+	if err := report.JSON(&out, got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(sequential, out.Bytes()) {
+		t.Fatalf("the report with 8 workers differs from the sequential report:\nsequential:\n%s\nparallel:\n%s", sequential, out.Bytes())
+	}
 	if got.Summary.FilesScanned != 2 || got.Summary.FilesSkipped != 2 {
 		t.Fatalf("scanned %d files and skipped %d, want 2 scanned and 2 skipped", got.Summary.FilesScanned, got.Summary.FilesSkipped)
 	}

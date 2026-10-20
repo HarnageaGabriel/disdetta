@@ -27,6 +27,11 @@ type Options struct {
 	ConfigPath string
 	Clock      func() time.Time
 	Exclude    []string
+	// JobHook, when set, wraps the reading and the parsing of every file of
+	// the scan. It receives the position of the file in the walk order and
+	// the function that reads and parses it. It is a test seam: the tests use
+	// it to control the order in which the files are parsed.
+	JobHook func(index int, scan func() diag.Report) diag.Report
 }
 
 // Scan walks root without changing it and returns a deterministic report.
@@ -99,7 +104,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 		steps = append(steps, scanStep{entry: entry, job: len(jobs)})
 		jobs = append(jobs, fileJob{path: entry.path, display: entry.display, info: entry.info})
 	}
-	reports := runPool(workers, jobs, scanFileJob)
+	reports := runPool(workers, jobs, options.scanJob)
 	for _, step := range steps {
 		if step.job < 0 {
 			out.Diagnostics = append(out.Diagnostics, walkDiagnostic(step.entry, &out))
@@ -166,13 +171,22 @@ func walkDiagnostic(entry repositoryEntry, out *diag.Report) diag.Diagnostic {
 	return diag.Diagnostic{}
 }
 
+// scanJob reads and parses one walked file. The hook of the options, when
+// set, wraps the reading and the parsing of the file.
+func (o Options) scanJob(index int, job fileJob) diag.Report {
+	if o.JobHook == nil {
+		return scanFileJob(job)
+	}
+	return o.JobHook(index, func() diag.Report { return scanFileJob(job) })
+}
+
 // scanFileJob reads and parses one walked file.
 func scanFileJob(job fileJob) diag.Report {
 	return scanFile(job.path, job.display, job.info)
 }
 
 // scanValuesJob reads and parses one resolved values file as chart values.
-func scanValuesJob(job fileJob) diag.Report {
+func scanValuesJob(_ int, job fileJob) diag.Report {
 	return scanValuesFile(valuesPlan{path: job.path, display: job.display})
 }
 

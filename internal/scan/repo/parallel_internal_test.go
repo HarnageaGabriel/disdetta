@@ -1,9 +1,13 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"runtime"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 )
@@ -44,7 +48,7 @@ func TestWorkerCount(t *testing.T) {
 // order, whatever order the jobs finish in.
 func TestRunPoolKeepsJobOrder(t *testing.T) {
 	jobs := []int{0, 1, 2, 3, 4, 5, 6, 7}
-	reports := runPool(4, jobs, func(job int) diag.Report {
+	reports := runPool(4, jobs, func(_ int, job int) diag.Report {
 		return diag.Report{Findings: []diag.Finding{{Location: diag.Location{Path: fmt.Sprint(job)}}}}
 	})
 	if len(reports) != len(jobs) {
@@ -61,12 +65,54 @@ func TestRunPoolKeepsJobOrder(t *testing.T) {
 // many workers.
 func TestRunPoolWithOneWorker(t *testing.T) {
 	jobs := []int{0, 1, 2}
-	reports := runPool(1, jobs, func(job int) diag.Report {
+	reports := runPool(1, jobs, func(_ int, job int) diag.Report {
 		return diag.Report{Summary: diag.Summary{FilesScanned: job}}
 	})
 	for i, r := range reports {
 		if r.Summary.FilesScanned != i {
 			t.Fatalf("report %d scanned %d files, want %d", i, r.Summary.FilesScanned, i)
 		}
+	}
+}
+
+// TestRunPoolRaisesThePanicOfAJob checks that a panic in a job does not take
+// the process down: the worker recovers it, the pool drains the queue and
+// waits for the other jobs, and the panic is raised again on the goroutine of
+// the caller with the value of the panic. The pool never returns a partial
+// report when a job panics.
+func TestRunPoolRaisesThePanicOfAJob(t *testing.T) {
+	sentinel := errors.New("the job failed")
+	jobs := []int{0, 1, 2, 3}
+	var finished atomic.Int64
+	raised := make(chan any, 1)
+	before := runtime.NumGoroutine()
+	go func() {
+		defer func() { raised <- recover() }()
+		runPool(len(jobs), jobs, func(_ int, job int) diag.Report {
+			if job == 1 {
+				panic(sentinel)
+			}
+			finished.Add(1)
+			return diag.Report{}
+		})
+	}()
+	select {
+	case value := <-raised:
+		err, ok := value.(error)
+		if !ok || !errors.Is(err, sentinel) {
+			t.Fatalf("the pool raised %v, want %v", value, sentinel)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the pool did not finish after a panic in a job")
+	}
+	if got := finished.Load(); got != int64(len(jobs)-1) {
+		t.Fatalf("%d jobs finished, want %d: the pool must drain the queue", got, len(jobs)-1)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := runtime.NumGoroutine(); got > before {
+		t.Fatalf("%d goroutines are still running, want at most %d: the pool must not leak a worker", got, before)
 	}
 }

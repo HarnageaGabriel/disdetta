@@ -17,8 +17,10 @@ import (
 // sequential.
 const WorkersEnv = "DISDETTA_WORKERS"
 
-// MaxWorkers is the highest number of workers the file pool uses, so a scan
-// never takes more than eight cores.
+// MaxWorkers is the default cap of the file pool: without an override the
+// scan uses at most eight workers, so it never takes more than eight cores.
+// DISDETTA_WORKERS sets the worker count exactly and can raise it above this
+// cap.
 const MaxWorkers = 8
 
 // fileJob is one file the scan reads and parses.
@@ -47,6 +49,46 @@ func workerCount() int {
 	return n
 }
 
+// jobPanic is the panic a job raised, if it raised one.
+type jobPanic struct {
+	raised bool
+	value  any
+}
+
+// jobPanics collects the panics raised by the jobs of a pool.
+type jobPanics struct {
+	mu     sync.Mutex
+	values []jobPanic
+}
+
+// record stores the value a job panicked with.
+func (p *jobPanics) record(index int, value any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.values[index] = jobPanic{raised: true, value: value}
+}
+
+// first returns the value of the panic of the lowest job index, so the pool
+// always raises the same panic, whatever the order in which the jobs finished.
+func (p *jobPanics) first() (any, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, entry := range p.values {
+		if entry.raised {
+			return entry.value, true
+		}
+	}
+	return nil, false
+}
+
+// raise raises the panic of the lowest job index again, on the goroutine of
+// the caller.
+func (p *jobPanics) raise() {
+	if value, ok := p.first(); ok {
+		panic(value)
+	}
+}
+
 // runPool reads and parses every job with at most workers goroutines and
 // returns one report per job, in job order.
 //
@@ -59,7 +101,12 @@ func workerCount() int {
 // it, and it fails the scan before any file is handed to a worker, so a
 // cancelled scan fails the same way for every worker count and the report of
 // a scan never depends on the number of workers.
-func runPool[J any](workers int, jobs []J, fn func(J) diag.Report) []diag.Report {
+//
+// A panic in a job does not take the process down: the worker recovers it,
+// the pool drains the queue and waits for the other workers, and the panic is
+// raised again on the goroutine of the caller with the value of the panic. A
+// failed scan therefore never returns a partial report.
+func runPool[J any](workers int, jobs []J, fn func(int, J) diag.Report) []diag.Report {
 	reports := make([]diag.Report, len(jobs))
 	if len(jobs) == 0 {
 		return reports
@@ -67,10 +114,22 @@ func runPool[J any](workers int, jobs []J, fn func(J) diag.Report) []diag.Report
 	if workers > len(jobs) {
 		workers = len(jobs)
 	}
+	panics := &jobPanics{values: make([]jobPanic, len(jobs))}
+	call := func(i int) {
+		raised := true
+		defer func() {
+			if raised {
+				panics.record(i, recover())
+			}
+		}()
+		reports[i] = fn(i, jobs[i])
+		raised = false
+	}
 	if workers <= 1 {
 		for i := range jobs {
-			reports[i] = fn(jobs[i])
+			call(i)
 		}
+		panics.raise()
 		return reports
 	}
 	queue := make(chan int)
@@ -80,7 +139,7 @@ func runPool[J any](workers int, jobs []J, fn func(J) diag.Report) []diag.Report
 		go func() {
 			defer wg.Done()
 			for i := range queue {
-				reports[i] = fn(jobs[i])
+				call(i)
 			}
 		}()
 	}
@@ -89,5 +148,6 @@ func runPool[J any](workers int, jobs []J, fn func(J) diag.Report) []diag.Report
 	}
 	close(queue)
 	wg.Wait()
+	panics.raise()
 	return reports
 }

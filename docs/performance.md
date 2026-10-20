@@ -151,11 +151,12 @@ files are visited by the walk but never opened.
 
 The scan reads and parses the files with a bounded pool of workers. The walk
 stays sequential and decides the order of the files: the files are then read
-and parsed by at most eight workers, the number of CPUs capped at eight, and
-the results are merged in walk order. The report is therefore the same for
-every worker count, byte for byte. The environment variable `DISDETTA_WORKERS`
-sets the worker count for tests and debugging, and a value of 1 makes the
-scan fully sequential.
+and parsed by at most eight workers by default, the number of CPUs capped at
+eight, and the results are merged in walk order. The report is therefore the
+same for every worker count, byte for byte. The environment variable
+`DISDETTA_WORKERS` sets the worker count for tests and debugging, and a value
+of 1 makes the scan fully sequential. A positive override is taken as it is:
+it can raise the worker count above eight.
 
 Two parts of the scan stay sequential on purpose:
 
@@ -197,7 +198,7 @@ What the table says:
   on its metadata, so there is nothing to parallelize and the two columns are
   the same number.
 - `ScanRepoBigFiles` reads 21 MiB in three files. Three files cannot fill
-  eight workers, so the gain comes from the parsing and not from the reads.
+  eight workers: the concurrency there is limited to three workers.
 
 The machine was not idle during the measurements: the background load of the
 processors was between 10 and 50 per cent during the runs, and the absolute
