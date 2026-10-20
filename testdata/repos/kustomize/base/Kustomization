@@ -1,0 +1,9 @@
+images:
+  - name: example/nginx
+    newName: bitnami/nginx
+    newTag: "1.25.3"
+helmCharts:
+  - name: redis
+    repo: https://charts.bitnami.com/bitnami
+    version: 20.6.2
+    valuesFile: ../values.yaml
