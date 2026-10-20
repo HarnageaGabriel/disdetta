@@ -1,0 +1,7 @@
+helmfiles:
+  - path: ../shared/helmfile.yaml
+bases:
+  - ../shared/base
+releases:
+  - name: db
+    chart: bitnami/postgresql
