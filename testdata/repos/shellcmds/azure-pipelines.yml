@@ -1,0 +1,72 @@
+# Shape source: SKorolchuk/dpio-platform
+# local-baremetal/core/azure-pipelines.yml:24,72.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+# padding preserves the corpus helm repository command line.
+steps:
+  - script: >-
+      true && helm repo add bitnami https://charts.bitnami.com/bitnami
+extra:
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+# padding preserves the corpus helm upgrade command line.
+  script: helm upgrade metrics-server-1617042143 bitnami/metrics-server

@@ -53,6 +53,11 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 	case strings.Contains(base, "values"):
 		s.scanImages(root, false)
 	}
+	// Shell commands are scanned only in the CI sources named by spec 9.2.
+	// Their script scalars are marked, so the whole-scalar fallback does not
+	// report prose or echo arguments that the shell tokenizer must ignore.
+	// Any other scalar of the same file still falls back (spec section 9).
+	s.scanShellScripts(root)
 	// Whole-scalar fallback (spec section 9): unknown-key image scalars and
 	// Bitnami chart repository URLs inside any scalar, in any file. A scalar a
 	// specific detector already reported is not reported again.

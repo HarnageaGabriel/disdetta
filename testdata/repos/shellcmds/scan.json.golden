@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 2,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 1,
+      "medium": 2,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "inferred",
+      "impact": "low",
+      "component": "kubectl",
+      "location": {
+        "path": ".gitlab-ci.yml",
+        "line": 120,
+        "column": 78
+      },
+      "reference": "docker.io/bitnami/kubectl:1.17.4",
+      "original": "bitnami/kubectl:1.17.4",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "8c1da75a6d81ab28"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "inferred",
+      "impact": "medium",
+      "component": "metrics-server",
+      "location": {
+        "path": "azure-pipelines.yml",
+        "line": 72,
+        "column": 50
+      },
+      "reference": "bitnami/metrics-server",
+      "original": "bitnami/metrics-server",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "88771c3e65d97375"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "inferred",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "azure-pipelines.yml",
+        "line": 24,
+        "column": 37
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "35e112415947c660"
+    }
+  ],
+  "diagnostics": []
+}
