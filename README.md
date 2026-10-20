@@ -17,6 +17,9 @@ in Kubernetes clusters and GitOps repositories. Read-only and reviewable by desi
       alt="Go version"></a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/HarnageaGabriel/disdetta">
+    <img src="https://api.scorecard.dev/projects/github.com/HarnageaGabriel/disdetta/badge"
+      alt="OpenSSF Scorecard"></a>
   <img src="https://img.shields.io/badge/status-pre--alpha-orange.svg" alt="Status: pre-alpha">
 </p>
 
@@ -189,3 +192,4 @@ No. It produces a checklist. The dump and restore stay under your control.
 ## License
 
 [Apache-2.0](LICENSE). disdetta is not affiliated with Bitnami or Broadcom.
+Third-party licenses: [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/README.md). Trademarks: [TRADEMARKS.md](TRADEMARKS.md).

@@ -3,3 +3,12 @@ images:
     newName: bitnami/redis
     newTag: "7"
   - name: example/nginx
+helmCharts:
+  - name: postgresql
+    repo: https://charts.bitnami.com/bitnami
+    version: 12.5.6
+    valuesInline:
+      image:
+        repository: bitnamilegacy/postgresql
+        tag: "16.4.0"
+    valuesFile: values.yaml
