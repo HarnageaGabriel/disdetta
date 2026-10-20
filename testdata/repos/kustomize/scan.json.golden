@@ -5,11 +5,11 @@
     "version": "dev"
   },
   "summary": {
-    "filesScanned": 2,
+    "filesScanned": 5,
     "filesSkipped": 0,
     "findings": {
-      "high": 3,
-      "medium": 2,
+      "high": 6,
+      "medium": 3,
       "low": 0
     },
     "diagnostics": 0,
@@ -26,7 +26,7 @@
       "component": "postgresql",
       "location": {
         "path": "helm-chart-inflation-generator.yaml",
-        "line": 9,
+        "line": 10,
         "column": 17
       },
       "reference": "docker.io/bitnamilegacy/postgresql:16.4.0",
@@ -71,6 +71,74 @@
         "embedded-values"
       ],
       "fingerprint": "1ff1092592e02c36"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "overrides.yaml",
+        "line": 1,
+        "column": 8
+      },
+      "reference": "docker.io/bitnamilegacy/redis:7.2.3",
+      "original": "bitnamilegacy/redis:7.2.3",
+      "attributes": [],
+      "fingerprint": "f93e21dc316a823e"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "values.yaml",
+        "line": 2,
+        "column": 15
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql:16.4.0",
+      "original": "bitnamilegacy/postgresql:16.4.0",
+      "attributes": [],
+      "fingerprint": "ff1cf778c8835376"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "nginx",
+      "location": {
+        "path": "base/Kustomization",
+        "line": 3,
+        "column": 14
+      },
+      "reference": "docker.io/bitnami/nginx:1.25.3",
+      "original": "bitnami/nginx:1.25.3",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "6fd407a1cf4586a6"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "base/Kustomization",
+        "line": 7,
+        "column": 11
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "cba32f4412d3dea0"
     },
     {
       "ruleId": "DSD-CHT-001",

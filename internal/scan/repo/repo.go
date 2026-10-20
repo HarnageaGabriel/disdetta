@@ -68,31 +68,43 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 		return r, nil
 	}
 	var out diag.Report
+	entries := []repositoryEntry{}
 	err = walkRepository(ctx, root, func(entry repositoryEntry) error {
 		if excluded(entry.display, options.Exclude) {
 			return nil
 		}
-		switch entry.problem {
-		case walkPathUnreadable:
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "path could not be read"))
-			return nil
-		case walkSymlink:
-			out.Summary.FilesSkipped++
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "symbolic link skipped"))
-			return nil
-		case walkMetadataUnreadable:
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "file metadata could not be read"))
-			return nil
-		case walkNonRegular:
-			out.Summary.FilesSkipped++
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "non-regular file skipped"))
-			return nil
-		}
-		appendReport(&out, scanFile(entry.path, entry.display, entry.info))
+		entries = append(entries, entry)
 		return nil
 	})
 	if err != nil {
 		return diag.Report{}, fmt.Errorf("walk %s: %w", original, err)
+	}
+	claimed, plans, valuesReport := planValuesFiles(root, entries, options.Exclude)
+	appendReport(&out, valuesReport)
+	for _, entry := range entries {
+		if entry.problem == 0 && claimed[pathKey(entry.path)] {
+			continue // scanned once below, as chart values
+		}
+		switch entry.problem {
+		case walkPathUnreadable:
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "path could not be read"))
+			continue
+		case walkSymlink:
+			out.Summary.FilesSkipped++
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "symbolic link skipped"))
+			continue
+		case walkMetadataUnreadable:
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "file metadata could not be read"))
+			continue
+		case walkNonRegular:
+			out.Summary.FilesSkipped++
+			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "non-regular file skipped"))
+			continue
+		}
+		appendReport(&out, scanFile(entry.path, entry.display, entry.info))
+	}
+	for _, plan := range plans {
+		appendReport(&out, scanValuesFile(plan))
 	}
 	finalize(&out)
 	configPath := options.ConfigPath
@@ -127,8 +139,9 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	}
 	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile")
+	kustomization := detect.IsKustomizationFile(path)
 	templateText := strings.HasSuffix(lower, ".tpl") || (yamlFile && underChartTemplates(path))
-	if !yamlFile && !dockerfile && !templateText {
+	if !yamlFile && !dockerfile && !kustomization && !templateText {
 		return out
 	}
 	data, err := readRegularFile(path, info)

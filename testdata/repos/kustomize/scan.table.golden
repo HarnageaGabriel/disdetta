@@ -1,7 +1,11 @@
-LOCATION                                  RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
-helm-chart-inflation-generator.yaml:9:17  DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16.4.0
-kustomization.yaml:3:14                   DSD-IMG-002  high      confirmed   high    docker.io/bitnami/redis:7
-kustomization.yaml:12:21                  DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16.4.0
-helm-chart-inflation-generator.yaml:5:7   DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
-kustomization.yaml:8:11                   DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
-scanned 2 files, skipped 0, findings 5 (high 3, medium 2, low 0), diagnostics 0, unresolved 0, ignored 0
+LOCATION                                   RULE         SEVERITY  CONFIDENCE  IMPACT  REFERENCE
+helm-chart-inflation-generator.yaml:10:17  DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16.4.0
+kustomization.yaml:3:14                    DSD-IMG-002  high      confirmed   high    docker.io/bitnami/redis:7
+kustomization.yaml:12:21                   DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16.4.0
+overrides.yaml:1:8                         DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/redis:7.2.3
+values.yaml:2:15                           DSD-IMG-001  high      confirmed   high    docker.io/bitnamilegacy/postgresql:16.4.0
+base/Kustomization:3:14                    DSD-IMG-002  high      confirmed   low     docker.io/bitnami/nginx:1.25.3
+base/Kustomization:7:11                    DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
+helm-chart-inflation-generator.yaml:5:7    DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
+kustomization.yaml:8:11                    DSD-CHT-001  medium    confirmed   high    https://charts.bitnami.com/bitnami
+scanned 5 files, skipped 0, findings 9 (high 6, medium 3, low 0), diagnostics 0, unresolved 0, ignored 0

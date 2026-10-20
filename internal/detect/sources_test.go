@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
@@ -18,6 +19,7 @@ func TestSection9YAMLSources(t *testing.T) {
 		{"argo sources", "argo.yaml", "kind: Application\nspec:\n  sources:\n  - repoURL: https://charts.bitnami.com/bitnami\n    chart: redis\n    helm:\n      values: 'image: bitnami/redis:7'\n      valuesObject: {sidecar: {image: bitnami/nginx:1}}\n", 3},
 		{"argo unrelated negative", "argo.yaml", "kind: ApplicationSet\nspec: {template: {spec: {source: {repoURL: https://example.invalid, chart: redis}}}}\n", 0},
 		{"kustomize", "kustomization.yaml", "images:\n- name: old\n  newName: bitnami/redis\n  newTag: '7'\n- name: bitnamilegacy/nginx\n  digest: sha256:abc\n", 2},
+		{"kustomize extensionless", "Kustomization", "images:\n- name: old\n  newName: bitnami/redis\n  newTag: '7'\n", 1},
 		{"kustomize negative", "kustomization.yaml", "images: [{name: example/app, newName: example/new}]\n", 0},
 		{"compose", "docker-compose.dev.yml", "services: {db: {image: bitnami/postgresql:16}}\n", 1},
 		{"compose unrelated negative", "compose.yaml", "x: {image: bitnami/not-service:1}\n", 0},
@@ -235,6 +237,38 @@ func TestKustomizeHelmCharts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Source: docs/spec/v0.1.md section 9.2 (the valuesFile references a
+// document declares).
+func TestValuesFileRefs(t *testing.T) {
+	tests := []struct {
+		name, path, input string
+		want              []string
+	}{
+		{"helm chart entry", "kustomization.yaml", "helmCharts:\n- name: postgresql\n  valuesFile: overrides.yaml\n", []string{"overrides.yaml"}},
+		{"extensionless kustomization", "Kustomization", "helmCharts:\n- name: postgresql\n  valuesFile: overrides.yaml\n", []string{"overrides.yaml"}},
+		{"generator", "generator.yaml", "kind: HelmChartInflationGenerator\nvaluesFile: overrides.yaml\n", []string{"overrides.yaml"}},
+		{"helm charts outside a kustomization are no reference", "app.yaml", "helmCharts:\n- name: postgresql\n  valuesFile: overrides.yaml\n", nil},
+		{"no values file", "kustomization.yaml", "helmCharts:\n- name: postgresql\n", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValuesFileRefs(tt.path, []byte(tt.input)).All()
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("source docs/spec/v0.1.md section 9.2: got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Source: docs/spec/v0.1.md section 9.2 (a values file is scanned as chart
+// values whatever its name).
+func TestHelmValues(t *testing.T) {
+	got := HelmValues("overrides.yaml", []byte("image:\n  repository: bitnamilegacy/postgresql\n  tag: '16.4.0'\n"))
+	if len(got.Findings) != 1 || got.Findings[0].RuleID != "DSD-IMG-001" {
+		t.Fatalf("source docs/spec/v0.1.md section 9.2: %#v", got.Findings)
 	}
 }
 
