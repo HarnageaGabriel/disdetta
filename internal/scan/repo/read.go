@@ -52,6 +52,14 @@ func walkRepository(ctx context.Context, root string, visit func(repositoryEntry
 			}
 			return nil
 		}
+		// The detectors read only a few kinds of file. A regular file with
+		// another name cannot change the report, so it is dropped before the
+		// metadata lookup and before the relative path is built. The entries
+		// that are not regular keep their diagnostics: a link and a device are
+		// still reported as skipped.
+		if entry.Type().IsRegular() && !scannableName(path) {
+			return nil
+		}
 		display := filepath.Base(path)
 		if rel, err := filepath.Rel(root, path); err == nil && rel != "." {
 			display = filepath.ToSlash(rel)
@@ -68,6 +76,17 @@ func walkRepository(ctx context.Context, root string, visit func(repositoryEntry
 		}
 		return visit(repositoryEntry{path: path, display: display, info: info})
 	})
+}
+
+// scannableName reports whether a detector reads the file named by path. It
+// looks at the name only, so the walk can decide before it looks at the
+// metadata of the file.
+//
+// The decision is the one the scan makes: the flags of the name are the
+// flags the scan uses, so a file that is not scannable here is not read by
+// the scan either, and dropping it in the walk leaves the report unchanged.
+func scannableName(path string) bool {
+	return classifyFile(path).scanned()
 }
 
 // ReadFile performs the bounded, regular-file-only read used by repository

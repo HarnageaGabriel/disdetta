@@ -80,7 +80,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 	var out diag.Report
 	entries := []repositoryEntry{}
 	err = walkRepository(ctx, root, func(entry repositoryEntry) error {
-		if excluded(entry.display, options.Exclude) {
+		if len(options.Exclude) != 0 && excluded(entry.display, options.Exclude) {
 			return nil
 		}
 		entries = append(entries, entry)
@@ -195,19 +195,59 @@ func scanValuesJob(_ int, job fileJob) diag.Report {
 	return scanValuesFile(valuesPlan{path: job.path, display: job.display})
 }
 
+// fileFlags are the properties of the name of a file that decide how the
+// detectors read it. They are the single source of truth for the files a
+// scan reads: the walk of the repository and the scan of a file use the same
+// flags, so a kind of file that is added once is read by both.
+type fileFlags struct {
+	yaml       bool
+	dockerfile bool
+	terraform  bool
+	template   bool
+	kustomize  bool
+	ignoreFile bool
+}
+
+// classifyFile returns the flags of the file named by path. The flags are
+// computed from the name of the file only, so the walk can classify a file
+// before it looks at its metadata, and the scan of the file classifies it the
+// same way.
+func classifyFile(path string) fileFlags {
+	lower := strings.ToLower(filepath.Base(path))
+	flags := fileFlags{
+		yaml:       strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml"),
+		dockerfile: lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile"),
+		terraform:  strings.HasSuffix(lower, ".tf"),
+		template:   strings.HasSuffix(lower, ".tpl") || strings.HasSuffix(lower, ".yaml.gotmpl"),
+		ignoreFile: lower == ".disdetta.yaml",
+	}
+	if len(lower) == len("kustomization") {
+		// Only the extensionless Kustomization file is left: the other two
+		// names kustomize accepts end in .yaml or .yml and are already
+		// covered by the YAML flag.
+		flags.kustomize = detect.IsKustomizationFile(path)
+	}
+	return flags
+}
+
+// scanned reports whether a detector reads the file. The ignore file of the
+// scan is read by the scan itself, never by a detector, so it is not scanned.
+func (f fileFlags) scanned() bool {
+	if f.ignoreFile {
+		return false
+	}
+	return f.yaml || f.dockerfile || f.terraform || f.template || f.kustomize
+}
+
 func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
-	lower := strings.ToLower(info.Name())
-	if lower == ".disdetta.yaml" {
+	flags := classifyFile(path)
+	if !flags.scanned() {
 		return out
 	}
-	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
-	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile")
-	kustomization := detect.IsKustomizationFile(path)
-	templateText := strings.HasSuffix(lower, ".tpl") || strings.HasSuffix(lower, ".yaml.gotmpl") || (yamlFile && underChartTemplates(path))
-	terraformFile := strings.HasSuffix(lower, ".tf")
-	if !yamlFile && !dockerfile && !kustomization && !templateText && !terraformFile {
-		return out
-	}
+	yamlFile := flags.yaml
+	dockerfile := flags.dockerfile
+	terraformFile := flags.terraform
+	templateText := flags.template || (yamlFile && underChartTemplates(path))
 	data, err := readRegularFile(path, info)
 	if errors.Is(err, ErrFileTooLarge) {
 		out.Summary.FilesSkipped++
