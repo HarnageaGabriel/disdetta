@@ -21,6 +21,8 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 	switch {
 	case base == "chart.yaml":
 		s.scanCharts(root)
+	case isHelmfile(s.path):
+		s.scanHelmfile(root)
 	case kind == "helmrepository" || kind == "ocirepository":
 		s.addChartAt(nodeAt(root, "spec", "url"), "")
 	case kind == "helmrelease":

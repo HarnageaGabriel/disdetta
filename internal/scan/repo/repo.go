@@ -127,7 +127,7 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	}
 	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile")
-	templateText := strings.HasSuffix(lower, ".tpl") || (yamlFile && underChartTemplates(path))
+	templateText := strings.HasSuffix(lower, ".tpl") || strings.HasSuffix(lower, ".yaml.gotmpl") || (yamlFile && underChartTemplates(path))
 	if !yamlFile && !dockerfile && !templateText {
 		return out
 	}

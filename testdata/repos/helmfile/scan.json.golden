@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 6,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 2,
+      "medium": 6,
+      "low": 0
+    },
+    "diagnostics": 1,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 13,
+        "column": 29
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "cba31a7f44e65806"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 8,
+        "column": 28
+      },
+      "reference": "docker.io/bitnamilegacy/redis",
+      "original": "bitnamilegacy/redis",
+      "attributes": [],
+      "fingerprint": "04deafbf5cbd585c"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "helmfile.d/duplicate-name.yaml",
+        "line": 8,
+        "column": 12
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/redis",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "7019bcba0ee8ab28"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 11,
+        "column": 12
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/postgresql",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "f9e337451ffa2fdc"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 15,
+        "column": 12
+      },
+      "reference": "registry-1.docker.io/bitnamicharts",
+      "original": "oci/redis",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "196c66db2ba84086"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 6,
+        "column": 12
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/redis",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "76dd7bca3dc87174"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "nginx",
+      "location": {
+        "path": "helmfile.d/extra.yaml",
+        "line": 6,
+        "column": 12
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/nginx",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "bf55eb4f1c22023f"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "nginx",
+      "location": {
+        "path": "helmfile.d/multi-doc.yaml",
+        "line": 3,
+        "column": 12
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/nginx",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "82a4464c6a558560"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "DSD-SCN-007",
+      "level": "info",
+      "message": "file read as template text",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 0,
+        "column": 0
+      }
+    }
+  ]
+}

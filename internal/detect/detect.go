@@ -53,13 +53,14 @@ func YAML(path string, data []byte) diag.Report {
 }
 
 type walkState struct {
-	path               string
-	keys               []string
-	globalRegistry     string
-	depthReported      bool
-	aliasLimitReported bool
-	templateComment    bool
-	out                *diag.Report
+	path                   string
+	keys                   []string
+	globalRegistry         string
+	depthReported          bool
+	aliasLimitReported     bool
+	templateComment        bool
+	suppressedHelmfileURLs map[[2]int]bool
+	out                    *diag.Report
 }
 
 func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
@@ -543,7 +544,8 @@ func (s *walkState) scanFallbackAt(n *yaml.Node, key string, depth int) {
 }
 
 func (s *walkState) scanFallbackScalar(n *yaml.Node, key string) {
-	if url, ok := chartURLIn(n.Value); ok {
+	_, suppressed := s.suppressedHelmfileURLs[[2]int{n.Line, n.Column}]
+	if url, ok := chartURLIn(n.Value); ok && !suppressed {
 		s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, n.Line, n.Column), Reference: url, Original: url, Attributes: []string{"chart"}})
 	}
 	if knownImageKeys[key] || !isWholeImageScalar(n.Value) {
