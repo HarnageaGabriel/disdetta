@@ -3,6 +3,7 @@ package detect
 import (
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
@@ -64,94 +65,113 @@ func TestHelmfileYAMLSources(t *testing.T) {
 	}
 }
 
+// helmfileWant is one expected Helmfile finding.
+type helmfileWant struct {
+	rule       string
+	line       int
+	column     int
+	component  string
+	impact     diag.Impact
+	confidence diag.Confidence
+	reference  string
+	original   string
+}
+
+// helmfileScan scans a Helmfile source the way the repository scanner does:
+// a `.gotmpl` file is template text, every other Helmfile file is YAML.
+func helmfileScan(path, input string) diag.Report {
+	if strings.HasSuffix(path, ".gotmpl") {
+		return Template(path, []byte(input))
+	}
+	return YAML(path, []byte(input))
+}
+
+// assertHelmfileFindings checks the findings of a Helmfile scan against the
+// expected ones, in source order.
+func assertHelmfileFindings(t *testing.T, source string, got diag.Report, want []helmfileWant) {
+	t.Helper()
+	sort.Slice(got.Findings, func(i, j int) bool {
+		if got.Findings[i].Location.Line == got.Findings[j].Location.Line {
+			return got.Findings[i].Location.Column < got.Findings[j].Location.Column
+		}
+		return got.Findings[i].Location.Line < got.Findings[j].Location.Line
+	})
+	if len(got.Findings) != len(want) {
+		t.Fatalf("source %s: got %#v", source, got.Findings)
+	}
+	for i, w := range want {
+		gotFinding := got.Findings[i]
+		if gotFinding.RuleID != w.rule || gotFinding.Location.Line != w.line ||
+			gotFinding.Location.Column != w.column || gotFinding.Component != w.component ||
+			gotFinding.Impact != w.impact || gotFinding.Confidence != w.confidence ||
+			gotFinding.Reference != w.reference || gotFinding.Original != w.original {
+			t.Fatalf("source %s: finding %d = %#v, want %#v", source, i, gotFinding, w)
+		}
+	}
+}
+
 // TestHelmfileFindingPlacement checks where a Helmfile finding is reported:
 // one dependency is one finding, on the release that uses it.
 func TestHelmfileFindingPlacement(t *testing.T) {
 	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9"
-	type wantFinding struct {
-		rule      string
-		line      int
-		column    int
-		component string
-		impact    diag.Impact
-		reference string
-		original  string
-	}
 	tests := []struct {
 		name  string
 		input string
-		want  []wantFinding
+		want  []helmfileWant
 	}{
 		{
 			name:  "used repository is reported at chart line",
 			input: "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n",
-			want:  []wantFinding{{"DSD-CHT-001", 6, 12, "postgresql", "high", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+			want:  []helmfileWant{{"DSD-CHT-001", 6, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
 		},
 		{
 			name:  "release before repositories remains at chart line",
 			input: "releases:\n  - name: db\n    chart: bitnami/postgresql\nrepositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n",
-			want:  []wantFinding{{"DSD-CHT-001", 3, 12, "postgresql", "high", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
 		},
 		{
 			name:  "two releases have two chart findings and no URL finding",
 			input: "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n  - name: cache\n    chart: bitnami/redis\n",
-			want: []wantFinding{
-				{"DSD-CHT-001", 6, 12, "postgresql", "high", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"},
-				{"DSD-CHT-001", 8, 12, "redis", "high", "https://charts.bitnami.com/bitnami", "bitnami/redis"},
+			want: []helmfileWant{
+				{"DSD-CHT-001", 6, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"},
+				{"DSD-CHT-001", 8, 12, "redis", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/redis"},
 			},
 		},
 		{
 			name:  "unused repository keeps URL line",
 			input: "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n",
-			want:  []wantFinding{{"DSD-CHT-001", 3, 10, "", "unknown", "https://charts.bitnami.com/bitnami", "https://charts.bitnami.com/bitnami"}},
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 10, "", "unknown", "confirmed", "https://charts.bitnami.com/bitnami", "https://charts.bitnami.com/bitnami"}},
 		},
 		{
 			name:  "duplicate names resolve every declaration",
 			input: "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n  - name: bitnami\n    url: https://charts.example.com/stable\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n",
-			want:  []wantFinding{{"DSD-CHT-001", 8, 12, "postgresql", "high", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+			want:  []helmfileWant{{"DSD-CHT-001", 8, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
 		},
 		{
 			// The repository is declared in an earlier document: the release
 			// is the only finding, the repository URL is not a second one.
 			name:  "repository in an earlier document is not a second finding",
 			input: "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n---\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n",
-			want:  []wantFinding{{"DSD-CHT-001", 7, 12, "postgresql", "high", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+			want:  []helmfileWant{{"DSD-CHT-001", 7, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
 		},
 		{
 			name:  "release in an earlier document is the only finding",
 			input: "releases:\n  - name: db\n    chart: bitnami/postgresql\n---\nrepositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n",
-			want:  []wantFinding{{"DSD-CHT-001", 3, 12, "postgresql", "high", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
 		},
 		{
 			name:  "two releases in a later document have two findings",
 			input: "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n---\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n  - name: cache\n    chart: bitnami/redis\n",
-			want: []wantFinding{
-				{"DSD-CHT-001", 7, 12, "postgresql", "high", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"},
-				{"DSD-CHT-001", 9, 12, "redis", "high", "https://charts.bitnami.com/bitnami", "bitnami/redis"},
+			want: []helmfileWant{
+				{"DSD-CHT-001", 7, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"},
+				{"DSD-CHT-001", 9, 12, "redis", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/redis"},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := YAML("helmfile.yaml", []byte(tt.input))
-			sort.Slice(got.Findings, func(i, j int) bool {
-				if got.Findings[i].Location.Line == got.Findings[j].Location.Line {
-					return got.Findings[i].Location.Column < got.Findings[j].Location.Column
-				}
-				return got.Findings[i].Location.Line < got.Findings[j].Location.Line
-			})
-			if len(got.Findings) != len(tt.want) {
-				t.Fatalf("source %s: got %#v", source, got.Findings)
-			}
-			for i, want := range tt.want {
-				gotFinding := got.Findings[i]
-				if gotFinding.RuleID != want.rule || gotFinding.Location.Line != want.line ||
-					gotFinding.Location.Column != want.column || gotFinding.Component != want.component ||
-					gotFinding.Impact != want.impact || gotFinding.Reference != want.reference ||
-					gotFinding.Original != want.original {
-					t.Fatalf("source %s: finding %d = %#v, want %#v", source, i, gotFinding, want)
-				}
-			}
+			assertHelmfileFindings(t, source, got, tt.want)
 		})
 	}
 }
@@ -569,5 +589,272 @@ func TestHelmfileTemplateOCIAlias(t *testing.T) {
 	got := Template("helmfile.yaml.gotmpl", []byte(input))
 	if len(got.Findings) != 1 || got.Findings[0].RuleID != "DSD-CHT-001" || got.Findings[0].Component != "redis" {
 		t.Fatalf("source %s: got %#v", source, got)
+	}
+}
+
+// TestHelmfileDirectOCIChart checks that a chart naming the Bitnami OCI
+// chart repository directly is a finding, in YAML and in gotmpl files: it
+// names no repository alias (review finding 2).
+func TestHelmfileDirectOCIChart(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9"
+	const reference = "oci://registry-1.docker.io/bitnamicharts"
+	tests := []struct {
+		name  string
+		path  string
+		input string
+		want  []helmfileWant
+	}{
+		{
+			name:  "yaml direct oci chart",
+			path:  "helmfile.yaml",
+			input: "releases:\n  - name: db\n    chart: oci://registry-1.docker.io/bitnamicharts/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "postgresql", "high", "confirmed", reference, "oci://registry-1.docker.io/bitnamicharts/postgresql"}},
+		},
+		{
+			name:  "gotmpl direct oci chart",
+			path:  "helmfile.yaml.gotmpl",
+			input: "releases:\n  - name: db\n    chart: oci://registry-1.docker.io/bitnamicharts/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "postgresql", "high", "confirmed", reference, "oci://registry-1.docker.io/bitnamicharts/postgresql"}},
+		},
+		{
+			name:  "yaml direct oci chart on docker hub",
+			path:  "helmfile.yaml",
+			input: "releases:\n  - name: cache\n    chart: oci://docker.io/bitnamicharts/redis\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "redis", "high", "confirmed", "oci://docker.io/bitnamicharts", "oci://docker.io/bitnamicharts/redis"}},
+		},
+		{
+			name:  "gotmpl direct oci chart on docker hub",
+			path:  "helmfile.yaml.gotmpl",
+			input: "releases:\n  - name: cache\n    chart: oci://docker.io/bitnamicharts/redis\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "redis", "high", "confirmed", "oci://docker.io/bitnamicharts", "oci://docker.io/bitnamicharts/redis"}},
+		},
+		{
+			// The component is the last path segment of the reference.
+			name:  "yaml direct oci chart with a nested path",
+			path:  "helmfile.yaml",
+			input: "releases:\n  - name: db\n    chart: oci://registry-1.docker.io/bitnamicharts/bitnami/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "postgresql", "high", "confirmed", reference, "oci://registry-1.docker.io/bitnamicharts/bitnami/postgresql"}},
+		},
+		{
+			// A templated chart name is never certain.
+			name:  "yaml templated direct oci chart",
+			path:  "helmfile.yaml",
+			input: "releases:\n  - name: db\n    chart: oci://registry-1.docker.io/bitnamicharts/{{ .Values.chart }}\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "", "unknown", "unresolved", reference, reference}},
+		},
+		{
+			name:  "gotmpl templated direct oci chart",
+			path:  "helmfile.yaml.gotmpl",
+			input: "releases:\n  - name: db\n    chart: oci://registry-1.docker.io/bitnamicharts/{{ .Values.chart }}\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 12, "", "unknown", "unresolved", reference, reference}},
+		},
+		{
+			// Another registry is not the Bitnami chart repository.
+			name:  "yaml direct oci chart of another registry",
+			path:  "helmfile.yaml",
+			input: "releases:\n  - name: db\n    chart: oci://ghcr.io/acme/charts/postgresql\n",
+			want:  nil,
+		},
+		{
+			name:  "gotmpl direct oci chart of another registry",
+			path:  "helmfile.yaml.gotmpl",
+			input: "releases:\n  - name: db\n    chart: oci://ghcr.io/acme/charts/postgresql\n",
+			want:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := helmfileScan(tt.path, tt.input)
+			for _, finding := range got.Findings {
+				if strings.Contains(finding.Original, "{{") || strings.Contains(finding.Reference, "{{") {
+					t.Fatalf("source %s: template body leaked in %#v", source, finding)
+				}
+			}
+			assertHelmfileFindings(t, source, got, tt.want)
+		})
+	}
+}
+
+// TestHelmfileUnusedOCIRepository checks that a Bitnami OCI repository that no
+// release uses is reported on its url entry, in YAML and in gotmpl files: the
+// `oci://` form and the bare registry form are both Bitnami repositories
+// (review finding 3).
+func TestHelmfileUnusedOCIRepository(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9"
+	tests := []struct {
+		name  string
+		path  string
+		input string
+		want  []helmfileWant
+	}{
+		{
+			name:  "yaml bare oci repository",
+			path:  "helmfile.yaml",
+			input: "repositories:\n  - name: oci\n    url: registry-1.docker.io/bitnamicharts\n    oci: true\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 10, "", "unknown", "confirmed", "registry-1.docker.io/bitnamicharts", "registry-1.docker.io/bitnamicharts"}},
+		},
+		{
+			name:  "gotmpl bare oci repository",
+			path:  "helmfile.yaml.gotmpl",
+			input: "repositories:\n  - name: oci\n    url: registry-1.docker.io/bitnamicharts\n    oci: true\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 10, "", "unknown", "confirmed", "registry-1.docker.io/bitnamicharts", "registry-1.docker.io/bitnamicharts"}},
+		},
+		{
+			name:  "yaml oci scheme repository",
+			path:  "helmfile.yaml",
+			input: "repositories:\n  - name: oci\n    url: oci://registry-1.docker.io/bitnamicharts\n    oci: true\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 10, "", "unknown", "confirmed", "oci://registry-1.docker.io/bitnamicharts", "oci://registry-1.docker.io/bitnamicharts"}},
+		},
+		{
+			name:  "gotmpl oci scheme repository",
+			path:  "helmfile.yaml.gotmpl",
+			input: "repositories:\n  - name: oci\n    url: oci://registry-1.docker.io/bitnamicharts\n    oci: true\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 10, "", "unknown", "confirmed", "oci://registry-1.docker.io/bitnamicharts", "oci://registry-1.docker.io/bitnamicharts"}},
+		},
+		{
+			// A release that uses the repository is the only finding.
+			name:  "yaml used oci repository",
+			path:  "helmfile.yaml",
+			input: "repositories:\n  - name: oci\n    url: registry-1.docker.io/bitnamicharts\n    oci: true\nreleases:\n  - name: cache\n    chart: oci/redis\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 7, 12, "redis", "high", "confirmed", "registry-1.docker.io/bitnamicharts", "oci/redis"}},
+		},
+		{
+			name:  "gotmpl used oci repository",
+			path:  "helmfile.yaml.gotmpl",
+			input: "repositories:\n  - name: oci\n    url: registry-1.docker.io/bitnamicharts\n    oci: true\nreleases:\n  - name: cache\n    chart: oci/redis\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 7, 12, "redis", "high", "confirmed", "registry-1.docker.io/bitnamicharts", "oci/redis"}},
+		},
+		{
+			// Another registry is not a Bitnami repository.
+			name:  "yaml other oci repository",
+			path:  "helmfile.yaml",
+			input: "repositories:\n  - name: oci\n    url: ghcr.io/acme/charts\n    oci: true\n",
+			want:  nil,
+		},
+		{
+			name:  "gotmpl other oci repository",
+			path:  "helmfile.yaml.gotmpl",
+			input: "repositories:\n  - name: oci\n    url: ghcr.io/acme/charts\n    oci: true\n",
+			want:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := helmfileScan(tt.path, tt.input)
+			assertHelmfileFindings(t, source, got, tt.want)
+		})
+	}
+}
+
+// TestHelmfileGotmplColumnZeroList checks that a YAML list written at column
+// zero is a list of the current section, in a gotmpl file (review finding 4).
+func TestHelmfileGotmplColumnZeroList(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9.1"
+	tests := []struct {
+		name  string
+		input string
+		want  []helmfileWant
+	}{
+		{
+			name:  "column zero list with a release",
+			input: "repositories:\n- name: bitnami\n  url: https://charts.bitnami.com/bitnami\nreleases:\n- name: db\n  chart: bitnami/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 6, 10, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+		},
+		{
+			name:  "column zero list with an unused repository",
+			input: "repositories:\n- name: bitnami\n  url: https://charts.bitnami.com/bitnami\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 3, 8, "", "unknown", "confirmed", "https://charts.bitnami.com/bitnami", "https://charts.bitnami.com/bitnami"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Template("helmfile.yaml.gotmpl", []byte(tt.input))
+			assertHelmfileFindings(t, source, got, tt.want)
+		})
+	}
+}
+
+// TestHelmfileGotmplTemplateActionKeepsSection checks that a template action
+// line does not end the section of a gotmpl file: a release that follows it
+// is still a release (review finding 4).
+func TestHelmfileGotmplTemplateActionKeepsSection(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9.1"
+	input := "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n" +
+		"releases:\n  - name: db\n    chart: bitnami/postgresql\n" +
+		"{{- if .Values.extra }}\n  - name: cache\n    chart: bitnami/redis\n{{- end }}\n"
+	want := []helmfileWant{
+		{"DSD-CHT-001", 6, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"},
+		{"DSD-CHT-001", 9, 12, "redis", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/redis"},
+	}
+	got := Template("helmfile.yaml.gotmpl", []byte(input))
+	assertHelmfileFindings(t, source, got, want)
+}
+
+// TestHelmfileGotmplNestedChartIsNotARelease checks that a chart key nested
+// in the values of a release is not a release chart (review finding 5).
+func TestHelmfileGotmplNestedChartIsNotARelease(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9.1"
+	input := "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n" +
+		"releases:\n  - name: db\n    chart: bitnami/postgresql\n    values:\n      - some:\n          chart: bitnami/redis\n"
+	want := []helmfileWant{{"DSD-CHT-001", 6, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}}
+	got := Template("helmfile.yaml.gotmpl", []byte(input))
+	assertHelmfileFindings(t, source, got, want)
+}
+
+// TestHelmfileGotmplImageColumn checks that the inline image of a gotmpl
+// release is reported at the first character of its value, as the YAML driver
+// reports it (review finding 6).
+func TestHelmfileGotmplImageColumn(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9.1"
+	input := "releases:\n  - name: db\n    chart: stable/nginx\n    values:\n      - image: {repository: bitnamilegacy/postgresql}\n"
+	for _, path := range []string{"helmfile.yaml", "helmfile.yaml.gotmpl"} {
+		t.Run(path, func(t *testing.T) {
+			got := helmfileScan(path, input)
+			if len(got.Findings) != 1 {
+				t.Fatalf("source %s: got %#v", source, got.Findings)
+			}
+			finding := got.Findings[0]
+			if finding.RuleID != "DSD-IMG-001" || finding.Location.Line != 5 || finding.Location.Column != 29 {
+				t.Fatalf("source %s: got %#v", source, finding)
+			}
+		})
+	}
+}
+
+// TestHelmfileCRLFInput checks that a Helmfile with Windows line endings is
+// scanned like any other: the tests run on Linux, Windows and macOS.
+func TestHelmfileCRLFInput(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9"
+	input := "repositories:\r\n  - name: bitnami\r\n    url: https://charts.bitnami.com/bitnami\r\n" +
+		"releases:\r\n  - name: db\r\n    chart: bitnami/postgresql\r\n"
+	want := []helmfileWant{{"DSD-CHT-001", 6, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}}
+	for _, path := range []string{"helmfile.yaml", "helmfile.yaml.gotmpl"} {
+		t.Run(path, func(t *testing.T) {
+			got := helmfileScan(path, input)
+			assertHelmfileFindings(t, source, got, want)
+		})
+	}
+}
+
+// TestHelmfileConcurrentScans checks that two scans of the same Helmfile
+// never share their state: the state of a file belongs to one scan
+// (review finding 8).
+func TestHelmfileConcurrentScans(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9"
+	input := "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n" +
+		"releases:\n  - name: db\n    chart: bitnami/postgresql\n"
+	want := []helmfileWant{{"DSD-CHT-001", 6, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}}
+	reports := make([]diag.Report, 8)
+	var wg sync.WaitGroup
+	for i := range reports {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			reports[i] = YAML("helmfile.yaml", []byte(input))
+		}()
+	}
+	wg.Wait()
+	for _, got := range reports {
+		assertHelmfileFindings(t, source, got, want)
 	}
 }

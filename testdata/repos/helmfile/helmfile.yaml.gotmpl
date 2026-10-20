@@ -1,9 +1,13 @@
 ﻿repositories:
-  - name: bitnami
-    url: https://charts.bitnami.com/bitnami
+- name: bitnami
+  url: https://charts.bitnami.com/bitnami
 releases:
-  - name: cache
-    chart: bitnami/redis
-    values:
-      - image: {repository: bitnamilegacy/redis}
+- name: cache
+  chart: bitnami/redis
+  values:
+  - image: {repository: bitnamilegacy/redis}
+{{- if .Values.extra }}
+- name: extra
+  chart: bitnami/mongodb
+{{- end }}
 # bitnami is mentioned only in a comment

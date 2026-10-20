@@ -9,7 +9,7 @@
     "filesSkipped": 0,
     "findings": {
       "high": 2,
-      "medium": 6,
+      "medium": 9,
       "low": 0
     },
     "diagnostics": 1,
@@ -26,7 +26,7 @@
       "component": "postgresql",
       "location": {
         "path": "helmfile.yaml",
-        "line": 13,
+        "line": 16,
         "column": 29
       },
       "reference": "docker.io/bitnamilegacy/postgresql",
@@ -43,7 +43,7 @@
       "location": {
         "path": "helmfile.yaml.gotmpl",
         "line": 8,
-        "column": 28
+        "column": 25
       },
       "reference": "docker.io/bitnamilegacy/redis",
       "original": "bitnamilegacy/redis",
@@ -76,7 +76,7 @@
       "component": "postgresql",
       "location": {
         "path": "helmfile.yaml",
-        "line": 11,
+        "line": 14,
         "column": 12
       },
       "reference": "https://charts.bitnami.com/bitnami",
@@ -94,7 +94,7 @@
       "component": "redis",
       "location": {
         "path": "helmfile.yaml",
-        "line": 15,
+        "line": 18,
         "column": 12
       },
       "reference": "registry-1.docker.io/bitnamicharts",
@@ -113,7 +113,7 @@
       "location": {
         "path": "helmfile.yaml.gotmpl",
         "line": 6,
-        "column": 12
+        "column": 10
       },
       "reference": "https://charts.bitnami.com/bitnami",
       "original": "bitnami/redis",
@@ -121,6 +121,24 @@
         "chart"
       ],
       "fingerprint": "76dd7bca3dc87174"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "mongodb",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 11,
+        "column": 10
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/mongodb",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "63b15ec86610908d"
     },
     {
       "ruleId": "DSD-CHT-001",
@@ -157,6 +175,42 @@
         "chart"
       ],
       "fingerprint": "82a4464c6a558560"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "nginx",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 20,
+        "column": 12
+      },
+      "reference": "oci://registry-1.docker.io/bitnamicharts",
+      "original": "oci://registry-1.docker.io/bitnamicharts/nginx",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "afd48e6507eca78d"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 8,
+        "column": 10
+      },
+      "reference": "oci://registry-1.docker.io/bitnamicharts",
+      "original": "oci://registry-1.docker.io/bitnamicharts",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "7c7fc8cae365f144"
     }
   ],
   "diagnostics": [
