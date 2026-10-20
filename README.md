@@ -91,7 +91,9 @@ exists today.
 
 - **Find everything.** Images in Pods, source charts of Helm releases, and in
   repositories `values.yaml`, `Chart.yaml` dependencies, Flux `HelmRelease`,
-  Argo CD `Application`, Dockerfile `FROM`, CI files.
+  Argo CD `Application`, Kustomize `helmCharts`, Helmfile releases, Terraform
+  `helm_release`, Dockerfile `FROM`, CI files, and the shell commands of CI
+  scripts.
 - **Three severities.** `bitnami` (now only `latest`, for development),
   `bitnamilegacy` (frozen), and `allowInsecureImages=true` (the workaround is
   still active).
@@ -112,7 +114,7 @@ exists today.
 
 | Capability | State |
 | --- | --- |
-| `scan` on repositories (Helm values and templates, `Chart.yaml`, Flux, Argo CD, Kustomize, compose, GitHub Actions, GitLab CI, Azure Pipelines, Dockerfile, Terraform) | Implemented; recall measured on a [public corpus](docs/corpus.md) |
+| `scan` on repositories (Helm values and templates, `Chart.yaml`, Flux, Argo CD, Kustomize, Helmfile, compose, GitHub Actions, GitLab CI, Azure Pipelines, Dockerfile, Terraform, shell commands in CI scripts) | Implemented; sources and rule IDs: [docs/usage/sources.md](docs/usage/sources.md); recall measured on a [public corpus](docs/corpus.md) |
 | `scan --cluster` (workloads, Helm releases, opt-in release Secrets) | Implemented, tested on kind |
 | Catalog of exit routes (data, each entry with a source) | PostgreSQL -> CloudNativePG (`partial`) |
 | `plan` ([docs](docs/usage/plan.md)) | PostgreSQL; Redis, Kafka, MongoDB, Keycloak need research (issues #3-#6) |
@@ -132,7 +134,9 @@ cluster ────┘   (pure)        severity,        └─ SARIF (code scan
 Detectors are pure functions over parsed YAML with line numbers. They do not
 render Helm templates: an unresolved value is reported as unresolved, never
 guessed ([ADR 0005](docs/adr/0005-no-template-rendering.md)). Problems have
-stable `DSD-*` codes ([docs/diagnostics](docs/diagnostics/README.md)).
+stable `DSD-*` codes ([docs/diagnostics](docs/diagnostics/README.md)). Every
+source that is read, and the rule IDs it reports, are listed in
+[docs/usage/sources.md](docs/usage/sources.md).
 
 ## Roadmap
 
