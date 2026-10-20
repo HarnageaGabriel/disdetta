@@ -108,24 +108,87 @@ What the table says:
 - `DetectValues` allocates about 78 MB to read a 4 MiB file, mostly in the
   YAML node tree.
 
-## Limits enforced by the scanner
+## Limits and worst cases
 
 These limits are part of the contract, so they shape the cost of a scan. They
-are read from the code and from the spec (`docs/spec/v0.1.md`).
+are read from the code and from the spec (`docs/spec/v0.1.md` section 3), and
+each of them produces a diagnostic, so a scan that reached a limit is never
+reported as a clean scan.
 
-| limit | value | source | effect |
-| --- | --- | --- | --- |
-| file size | 16 MiB | `internal/scan/repo/repo.go`, `MaxFileSize` | larger files are not scanned, `DSD-SCN-008` error, the scan is incomplete |
-| YAML nesting depth | 256 levels | `internal/detect/detect.go`, `maxYAMLDepth` | deeper subtrees are not scanned, `DSD-SCN-005` warning |
-| alias expansion budget | 10000 nodes | `internal/detect/sources.go`, `maxAliasNodes` | the rest of the file is not scanned, `DSD-SCN-005` warning |
-| Dockerfile line length | 1 MiB | `internal/detect/detect.go`, `maxDockerfileLine` | the rest of the file is not scanned, `DSD-SCN-005` warning |
-| directory depth | no limit | `internal/scan/repo/repo.go`, `walkRepository` | every directory is visited |
+| limit | value | diagnostic | enforced in | documented in |
+| --- | --- | --- | --- | --- |
+| file size | 16 MiB | `DSD-SCN-008`, error | `internal/scan/repo/repo.go`, `MaxFileSize` | [spec](spec/v0.1.md) section 3, [DSD-SCN-008](diagnostics/DSD-SCN-008.md) |
+| YAML nesting depth | 256 levels | `DSD-SCN-005`, warning | `internal/detect/detect.go`, `maxYAMLDepth` | [spec](spec/v0.1.md) section 3, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| alias expansion budget | 10000 nodes | `DSD-SCN-005`, warning | `internal/detect/sources.go`, `maxAliasNodes` | [spec](spec/v0.1.md) section 3, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| Dockerfile line length | 1 MiB | `DSD-SCN-005`, warning | `internal/detect/detect.go`, `maxDockerfileLine` | [spec](spec/v0.1.md) section 3, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| Dockerfile continuation lines per instruction | 10000 lines | `DSD-SCN-005`, warning | `internal/detect/detect.go`, `MaxDockerfileContinuationLines` | [spec](spec/v0.1.md) sections 3 and 9, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| Terraform file size | 16 MiB | `DSD-SCN-008`, error | `internal/detect/terraform.go`, `maxTerraformBytes` | [DSD-SCN-008](diagnostics/DSD-SCN-008.md) |
+| Terraform HCL depth | 256 levels | `DSD-SCN-005`, warning | `internal/detect/terraform.go`, `maxTerraformDepth` | [spec](spec/v0.1.md) sections 3 and 9, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| Terraform node budget | 100000 nodes | `DSD-SCN-005`, warning | `internal/detect/terraform.go`, `maxTerraformNodes` | [spec](spec/v0.1.md) sections 3 and 9, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| findings per file | 10000 findings | `DSD-SCN-005`, warning | `internal/diag/diag.go`, `MaxFindingsPerFile` | [spec](spec/v0.1.md) section 3, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| findings per repository | 100000 findings | `DSD-SCN-005`, warning | `internal/diag/diag.go`, `MaxFindingsPerRepository` | [spec](spec/v0.1.md) section 3, [DSD-SCN-005](diagnostics/DSD-SCN-005.md) |
+| scan workers | 8 workers | none | `internal/scan/repo/parallel.go`, `MaxWorkers` | [Parallel scanning](#parallel-scanning) below |
+| directory depth | no limit | none | `internal/scan/repo/repo.go`, `walkRepository` | this section |
 
 The walk skips the `.git`, `node_modules` and `vendor` directories
 (`internal/scan/repo/repo.go`, `skippedDirectories`). Symlinks and other non
 regular files are skipped with `DSD-SCN-002`. Only `.yaml`, `.yml`,
 `.tpl`, `Dockerfile` and `Dockerfile.*` files are read and parsed; other
 files are visited by the walk but never opened.
+
+The threats each limit answers are in
+[docs/threat-model.md](threat-model.md), in the section "Hostile
+repositories".
+
+### What the audit fixed
+
+An adversarial audit built hostile inputs and measured them. Three of them
+made the scan quadratic and one left the number of findings unbounded. They
+are fixed now. The times below were measured once, on one machine, and they
+are here to show the size of the change, not as a promise for your hardware.
+
+| hostile input | before | after |
+| --- | --- | --- |
+| one YAML file with 20000 documents | 42 s | well under a second |
+| one CI file with 20000 script steps | 13 s (Azure Pipelines), 15 s (GitHub Actions), 25 s (GitLab CI) | 0.06 s |
+| one Dockerfile with 1000000 continuation lines | over 60 s | 29 ms |
+
+The output of the scan did not change: the golden files stayed the same, so
+the fix changed the cost and not the report. The scan is now linear in the
+number of YAML documents, in the number of CI script steps and in the number
+of Dockerfile continuation lines.
+
+The bounds are kept by tests that generate the hostile input and end the
+test with a timeout guard, so a quadratic implementation fails the test
+instead of running for minutes:
+
+- `internal/detect/limits_test.go`, `TestManyDocumentsAreScannedInLinearTime`:
+  50000 documents, 30 second guard.
+- `internal/detect/shellcmd_test.go`, `TestShellScanManySteps`: 20000 steps
+  for GitHub Actions, GitLab CI and Azure Pipelines, 60 second guard and a
+  5 second budget.
+- `internal/detect/dockerfile_limit_test.go`, `TestDockerfileContinuationChainUnderLimit`:
+  9000 continuation lines, 30 second guard.
+
+The audit also found that the number of findings was unbounded: one 14 MiB
+file with 400000 image lines produced 180 MB of output and about 1 GB of
+memory. The findings limits above bound that, and the limit is reported as
+`DSD-SCN-005` and never as a silent truncation.
+
+### Worst cases that remain
+
+- **A large file costs a lot of memory.** A YAML file is decoded into a node
+  tree before any rule runs, so the memory cost is a multiple of the size of
+  the file: the audit measured on the order of 100 MB for a 16 MiB YAML file.
+  The `DetectValues` row above shows the same thing for a 4 MiB file, at
+  about 78 MB of allocations.
+- **A repository with a very large number of files is slow.** The audit
+  measured about 18 s for a repository of 200000 empty files. The cost is
+  linear in the number of files, and there is no limit on that number.
+- **The worker pool multiplies the peak memory.** Up to eight files are
+  parsed at the same time, so the peak memory of a scan is about the peak
+  memory of one file times the number of workers. `DISDETTA_WORKERS=1` makes
+  the scan sequential and removes that multiplication.
 
 ## Known cost drivers
 
