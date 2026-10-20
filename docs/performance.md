@@ -32,7 +32,7 @@ repository.
 | item | value |
 | --- | --- |
 | OS and architecture | `windows/amd64` (`go env GOOS GOARCH`) |
-| CPU | 12 logical processors (6 cores) |
+| CPU | 12 logical processors (6 cores), AMD Ryzen 5 9600X |
 | Go | go1.26.5 |
 | Storage | local disk |
 
@@ -76,6 +76,10 @@ Median of 3 runs of `go test -run=^$ -bench=. -benchmem -count=3 ./internal/...`
 `files/s` is the number of scanned files per second. `files/s` counts every
 file scanned during the whole run, so it stays consistent with `ns/op`:
 `files/s` is `files * 1e9 / ns/op`.
+
+These numbers were measured with the sequential scanner. The section
+"Parallel scanning" below holds the before and after comparison of the
+sequential and the parallel scanner.
 
 | benchmark | files | ns/op | MB/s | files/s | B/op | allocs/op |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -143,12 +147,91 @@ files are visited by the walk but never opened.
 6. Big files. A single 9 MiB manifest is parsed as one document. Files that
    hold many small documents are the expensive case.
 
-## Parallel scanning is not implemented yet
+## Parallel scanning
 
-The scan is single threaded: one directory walk, one file at a time, on one
-core. Nothing in the numbers above uses more than one core, and the 12
-logical processors of the machine were idle.
+The scan reads and parses the files with a bounded pool of workers. The walk
+stays sequential and decides the order of the files: the files are then read
+and parsed by at most eight workers, the number of CPUs capped at eight, and
+the results are merged in walk order. The report is therefore the same for
+every worker count, byte for byte. The environment variable `DISDETTA_WORKERS`
+sets the worker count for tests and debugging, and a value of 1 makes the
+scan fully sequential.
 
-Adding parallel scanning is the second half of issue 17 and is tracked
-separately. Until it lands, these numbers describe the cost of the current
-serial scanner, not the cost of the best scanner this design could reach.
+Two parts of the scan stay sequential on purpose:
+
+- the walk, because it decides the order of the files and the scan limits;
+- the values file pre-pass, because it resolves the values files a document
+  claims, and the claim decides whether a file is scanned as a plain document
+  or as chart values.
+
+A cancelled scan still fails in the walk, before any file is handed to a
+worker, exactly like it did with the sequential scanner.
+
+### Before and after
+
+Both columns come from the same command, run on the same machine:
+
+```sh
+go test -run=^$ -bench=. -benchmem -count=3 ./internal/scan/repo/
+```
+
+The before column is the sequential scanner and the after column the parallel
+one. The numbers are the median of three runs.
+
+| benchmark | files | before ns/op | after ns/op | speedup | before files/s | after files/s |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ScanRepoSmall` | 20 | 6 040 715 | 4 293 725 | 1.41x | 3 311 | 4 658 |
+| `ScanRepoMedium` | 200 | 68 359 085 | 39 577 930 | 1.73x | 2 926 | 5 053 |
+| `ScanRepoLarge` | 2000 | 708 185 750 | 371 093 300 | 1.91x | 2 824 | 5 389 |
+| `ScanRepoBigFiles` | 3 | 203 377 000 | 136 355 112 | 1.49x | 14.75 | 22.00 |
+| `ScanRepoOversizedFile` | 1 (skipped) | 104 287 | 102 333 | 1.02x | n/a | n/a |
+
+What the table says:
+
+- The large tier, 2000 files, is 1.91x faster. The target of issue 17, at
+  least 1.5x on the large tier, is met on this machine.
+- The medium tier is 1.73x faster and the small tier 1.41x. The smaller the
+  tree, the smaller the share of the scan the pool can take over: the walk,
+  the values file pre-pass and the final sort stay sequential.
+- `ScanRepoOversizedFile` reads no file at all: the scanner rejects the file
+  on its metadata, so there is nothing to parallelize and the two columns are
+  the same number.
+- `ScanRepoBigFiles` reads 21 MiB in three files. Three files cannot fill
+  eight workers, so the gain comes from the parsing and not from the reads.
+
+The machine was not idle during the measurements: the background load of the
+processors was between 10 and 50 per cent during the runs, and the absolute
+numbers move by about ten per cent between two runs for that reason. Three
+runs of the parallel scanner gave 335 to 371 ms/op on the large tier, and
+that spread is the load of the machine. The control run below measures both
+paths of the same binary, one after the other, so it does not depend on the
+load between two sessions.
+
+### Control run
+
+A second run of the parallel code with `DISDETTA_WORKERS=1` measures the
+sequential path of the same binary, so the comparison does not depend on the
+load of the machine between two sessions.
+
+| benchmark | 1 worker ns/op | 8 workers ns/op | speedup |
+| --- | --- | --- | --- |
+| `ScanRepoSmall` | 6 512 454 | 4 293 725 | 1.52x |
+| `ScanRepoMedium` | 80 484 600 | 39 577 930 | 2.03x |
+| `ScanRepoLarge` | 810 409 200 | 371 093 300 | 2.18x |
+| `ScanRepoBigFiles` | 180 466 100 | 136 355 112 | 1.32x |
+| `ScanRepoOversizedFile` | 99 582 | 102 333 | 0.97x |
+
+### When the parallelism does not help
+
+- Small trees. Below a few hundred files the sequential walk and the final
+  sort are a large part of the scan, and the pool only takes a small share of
+  it.
+- Input bound scans. When the files come from a slow disk, from a network
+  share or from a cold cache, the reads are the bottleneck. The workers
+  overlap the waits, but they cannot make the device faster.
+- Work that stays sequential. The values file pre-pass reads every YAML file
+  again, one file at a time, to find the values files the documents claim. It
+  stays sequential on purpose, so a tree of many YAML files keeps a serial
+  part, and the pre-pass is one reason the small tiers gain the least.
+- Big files. One file is parsed by one worker, so a tree of a few very large
+  files gains less than a tree of many small ones.
