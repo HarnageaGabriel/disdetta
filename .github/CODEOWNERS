@@ -1,0 +1,14 @@
+# Code owners for disdetta.
+# Syntax: one pattern per line, followed by one or more owners.
+# Later patterns take precedence over earlier ones, so the default is first.
+
+# Default owner for everything in this repository.
+* @HarnageaGabriel
+
+# Explicit owners for governance, contract, and data paths.
+/docs/spec/ @HarnageaGabriel
+/.github/ @HarnageaGabriel
+/catalog/ @HarnageaGabriel
+/schemas/ @HarnageaGabriel
+/SECURITY.md @HarnageaGabriel
+/docs/governance.md @HarnageaGabriel
