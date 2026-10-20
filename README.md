@@ -68,6 +68,8 @@ Exit status 0 means no findings, 1 means findings (tune with `--fail-on`), 2
 means a usage or fatal error, 3 means the scan was incomplete. Rules and codes:
 [docs/diagnostics](docs/diagnostics/README.md); contract: [docs/spec/v0.1.md](docs/spec/v0.1.md). `--format json` gives a stable, versioned document for CI; `--format sarif` gives code-scanning output.
 
+GitHub Action: [docs/usage/github-action.md](docs/usage/github-action.md) runs the same scan in a workflow and gates a pull request on it.
+
 ## Why
 
 On 2025-08-28 Bitnami moved its versioned images from `docker.io/bitnami` to
