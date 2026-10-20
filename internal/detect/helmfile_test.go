@@ -790,6 +790,56 @@ func TestHelmfileGotmplTemplateActionKeepsSection(t *testing.T) {
 	assertHelmfileFindings(t, source, got, want)
 }
 
+// TestHelmfileGotmplTemplateComment checks that the body of a Go template
+// comment is not read as YAML: the entries of a comment that spans several
+// lines are ignored, and the entries that follow it are still read (spec
+// section 9.1: comments are ignored).
+func TestHelmfileGotmplTemplateComment(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md section 9.1"
+	const repositories = "repositories:\n  - name: bitnami\n    url: https://charts.bitnami.com/bitnami\n"
+	tests := []struct {
+		name  string
+		input string
+		want  []helmfileWant
+	}{
+		{
+			// The commented entries are not repositories and not releases:
+			// the real release is the only finding.
+			name:  "multi-line comment is ignored",
+			input: repositories + "{{/*\nrepositories:\n  - name: fake\n    url: https://charts.bitnami.com/bitnami\nreleases:\n  - name: fake\n    chart: bitnami/redis\n*/}}\n" + "releases:\n  - name: db\n    chart: bitnami/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 14, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+		},
+		{
+			name:  "multi-line comment with trim markers is ignored",
+			input: repositories + "{{- /*\nrepositories:\n  - name: fake\n    url: https://charts.bitnami.com/bitnami\nreleases:\n  - name: fake\n    chart: bitnami/redis\n*/ -}}\n" + "releases:\n  - name: db\n    chart: bitnami/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 14, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+		},
+		{
+			name:  "comment inside a release is ignored",
+			input: repositories + "releases:\n  - name: db\n    {{/*\n    chart: bitnami/redis\n    */}}\n    chart: bitnami/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 9, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+		},
+		{
+			// A single-line comment is still ignored, and it does not end
+			// the section of the file.
+			name:  "single-line comment keeps the section",
+			input: repositories + "{{/* a comment */}}\nreleases:\n  - name: db\n    chart: bitnami/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 7, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+		},
+		{
+			name:  "single-line comment in a release is ignored",
+			input: repositories + "releases:\n  - name: db\n    {{/* chart: bitnami/redis */}}\n    chart: bitnami/postgresql\n",
+			want:  []helmfileWant{{"DSD-CHT-001", 7, 12, "postgresql", "high", "confirmed", "https://charts.bitnami.com/bitnami", "bitnami/postgresql"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Template("helmfile.yaml.gotmpl", []byte(tt.input))
+			assertHelmfileFindings(t, source, got, tt.want)
+		})
+	}
+}
+
 // TestHelmfileGotmplNestedChartIsNotARelease checks that a chart key nested
 // in the values of a release is not a release chart (review finding 5).
 func TestHelmfileGotmplNestedChartIsNotARelease(t *testing.T) {

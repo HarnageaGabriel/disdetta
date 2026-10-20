@@ -423,9 +423,15 @@ func (s *walkState) scanHelmfileTemplate(data []byte) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), maxDockerfileLine)
 	line := 0
+	comment := helmfileComment{}
 	for scanner.Scan() {
 		line++
 		text := scanner.Text()
+		if comment.skip(text) {
+			// The line is the body of a Go template comment: it is not
+			// YAML (spec section 9.1: comments are ignored).
+			continue
+		}
 		trimmed := strings.TrimSpace(text)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
@@ -504,6 +510,69 @@ func (s *walkState) scanHelmfileTemplate(data []byte) {
 		recordCurrent()
 	}
 	file.resolve(s)
+}
+
+// helmfileComment tracks a Go template comment. The body of a comment that
+// spans several lines is not YAML: the lines of the comment are ignored
+// (spec section 9.1: comments are ignored).
+type helmfileComment struct {
+	open bool
+}
+
+// skip reports whether the line belongs to a Go template comment. The line
+// that opens a comment is skipped, and so is every line until the line that
+// closes it.
+func (c *helmfileComment) skip(text string) bool {
+	if c.open {
+		if helmfileCommentEnd(text) >= 0 {
+			c.open = false
+		}
+		return true
+	}
+	start := helmfileCommentStart(text)
+	if start < 0 {
+		return false
+	}
+	if helmfileCommentEnd(text[start:]) < 0 {
+		c.open = true
+	}
+	return true
+}
+
+// helmfileCommentStart returns the index of the start of a Go template
+// comment in the line, or -1 when the line opens no comment. A comment opens
+// with `{{/*`, with the trim markers of Go templates (`{{- /*`) allowed.
+func helmfileCommentStart(text string) int {
+	for i := 0; i+1 < len(text); i++ {
+		if text[i] != '{' || text[i+1] != '{' {
+			continue
+		}
+		rest := strings.TrimLeft(text[i+2:], " \t")
+		rest = strings.TrimPrefix(rest, "-")
+		rest = strings.TrimLeft(rest, " \t")
+		if strings.HasPrefix(rest, "/*") {
+			return i
+		}
+	}
+	return -1
+}
+
+// helmfileCommentEnd returns the index of the end of a Go template comment in
+// the line, or -1 when the line closes no comment. A comment closes with
+// `*/}}`, with the trim markers of Go templates (`*/ -}}`) allowed.
+func helmfileCommentEnd(text string) int {
+	for i := 0; i+1 < len(text); i++ {
+		if text[i] != '*' || text[i+1] != '/' {
+			continue
+		}
+		rest := strings.TrimLeft(text[i+2:], " \t")
+		rest = strings.TrimPrefix(rest, "-")
+		rest = strings.TrimLeft(rest, " \t")
+		if strings.HasPrefix(rest, "}}") {
+			return i
+		}
+	}
+	return -1
 }
 
 // helmfileItem is the list item a Helmfile section is in: the indent of the
