@@ -1145,6 +1145,7 @@ func TestHelmfileInlineValuesRules(t *testing.T) {
 			assertHelmfileFindings(t, source, got, tt.want)
 		})
 	}
+}
 
 // helmfileFixtureDir is the directory of the real Helmfile fixtures, relative
 // to the directory of this package.
