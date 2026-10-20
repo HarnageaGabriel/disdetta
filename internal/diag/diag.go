@@ -136,19 +136,50 @@ type Report struct {
 type Entry struct {
 	Code     string
 	Title    string
+	OneLiner string
 	Severity Severity
 	Level    Level
 }
 
-var entries = []Entry{
-	{Code: "DSD-CFG-001", Title: "allowInsecureImages is enabled", Severity: SeverityHigh}, {Code: "DSD-IMG-001", Title: "Bitnami legacy image", Severity: SeverityHigh}, {Code: "DSD-IMG-002", Title: "Versioned Bitnami image", Severity: SeverityHigh}, {Code: "DSD-IMG-003", Title: "Community Bitnami image", Severity: SeverityMedium}, {Code: "DSD-IMG-004", Title: "Bitnami image from another registry", Severity: SeverityLow}, {Code: "DSD-CHT-001", Title: "Bitnami chart source", Severity: SeverityMedium}, {Code: "DSD-CHT-002", Title: "Vendored Bitnami chart", Severity: SeverityMedium},
-	{Code: "DSD-SCN-001", Title: "Malformed file", Level: LevelError}, {Code: "DSD-SCN-002", Title: "File skipped", Level: LevelWarning}, {Code: "DSD-SCN-008", Title: "File larger than the size limit", Level: LevelError}, {Code: "DSD-SCN-003", Title: "Unresolved reference", Level: LevelInfo}, {Code: "DSD-SCN-004", Title: "Read error", Level: LevelError}, {Code: "DSD-SCN-005", Title: "Limit reached", Level: LevelWarning}, {Code: "DSD-SCN-006", Title: "Ignore entry expired", Level: LevelWarning}, {Code: "DSD-SCN-007", Title: "Template text scanned line by line", Level: LevelInfo},
-	{Code: "DSD-SCN-009", Title: "Helm release payload over a cap or not decodable", Level: LevelError},
-	{Code: "DSD-SCN-010", Title: "Cluster list failed", Level: LevelWarning},
+// DocURL returns the stable diagnostics page for an entry.
+func (e Entry) DocURL() string {
+	return "https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/" + e.Code + ".md"
 }
 
-// List returns the registry in contract order.
-func List() []Entry { return append([]Entry(nil), entries...) }
+// Kind returns whether the entry is a finding rule or scanner diagnostic.
+func (e Entry) Kind() string {
+	if e.Severity != "" {
+		return "rule"
+	}
+	return "diagnostic"
+}
+
+var entries = []Entry{
+	{Code: "DSD-CFG-001", Title: "allowInsecureImages is enabled", OneLiner: "Image verification is disabled by allowInsecureImages.", Severity: SeverityHigh},
+	{Code: "DSD-IMG-001", Title: "Bitnami legacy image", OneLiner: "The frozen Bitnamilegacy image has no security updates.", Severity: SeverityHigh},
+	{Code: "DSD-IMG-002", Title: "Versioned Bitnami image", OneLiner: "A versioned Bitnami image may no longer pull from the public path.", Severity: SeverityHigh},
+	{Code: "DSD-IMG-003", Title: "Community Bitnami image", OneLiner: "A community-tier Bitnami image is intended for development.", Severity: SeverityMedium},
+	{Code: "DSD-IMG-004", Title: "Bitnami image from another registry", OneLiner: "The Bitnami image is mirrored or rebuilt outside Docker Hub.", Severity: SeverityLow},
+	{Code: "DSD-CHT-001", Title: "Bitnami chart source", OneLiner: "The chart is sourced from a Bitnami chart repository.", Severity: SeverityMedium},
+	{Code: "DSD-CHT-002", Title: "Vendored Bitnami chart", OneLiner: "A vendored Bitnami chart pins its images.", Severity: SeverityMedium},
+	{Code: "DSD-SCN-001", Title: "Malformed file", OneLiner: "The file could not be parsed.", Level: LevelError},
+	{Code: "DSD-SCN-002", Title: "File skipped", OneLiner: "The path was skipped because it is not a regular file.", Level: LevelWarning},
+	{Code: "DSD-SCN-008", Title: "File larger than the size limit", OneLiner: "The file exceeded the scan size limit.", Level: LevelError},
+	{Code: "DSD-SCN-003", Title: "Unresolved reference", OneLiner: "A templated reference has no static Bitnami evidence.", Level: LevelInfo},
+	{Code: "DSD-SCN-004", Title: "Read error", OneLiner: "The path could not be read.", Level: LevelError},
+	{Code: "DSD-SCN-005", Title: "Limit reached", OneLiner: "A scanner safety limit was reached.", Level: LevelWarning},
+	{Code: "DSD-SCN-006", Title: "Ignore entry expired", OneLiner: "The ignore entry has expired.", Level: LevelWarning},
+	{Code: "DSD-SCN-007", Title: "Template text scanned line by line", OneLiner: "Template text was scanned line by line.", Level: LevelInfo},
+	{Code: "DSD-SCN-009", Title: "Helm release payload over a cap or not decodable", OneLiner: "The Helm release payload could not be decoded.", Level: LevelError},
+	{Code: "DSD-SCN-010", Title: "Cluster list failed", OneLiner: "A cluster list call failed.", Level: LevelWarning},
+}
+
+// List returns the registry sorted by code.
+func List() []Entry {
+	out := append([]Entry(nil), entries...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
+	return out
+}
 
 // DedupeFindings drops exact repeats so an anchor and every alias use of one
 // logical reference are reported once, at the anchor (spec section 5).
