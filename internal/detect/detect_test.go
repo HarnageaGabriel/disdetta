@@ -1,9 +1,11 @@
 package detect
 
 import (
-	"github.com/HarnageaGabriel/disdetta/internal/diag"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/HarnageaGabriel/disdetta/internal/diag"
 )
 
 func TestRulesPositiveAndNegative(t *testing.T) {
@@ -66,5 +68,37 @@ func TestDockerfileLimit(t *testing.T) {
 	got := Dockerfile("Dockerfile", []byte(strings.Repeat("#", maxDockerfileLine+1)))
 	if len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "DSD-SCN-005" {
 		t.Fatalf("source docs/spec/v0.1.md section 3: %#v", got)
+	}
+}
+
+func FuzzYAML(f *testing.F) {
+	f.Add([]byte("image: bitnami/redis:7\n"))
+	f.Add([]byte("kind: Secret\nstringData:\n  image: user:pass@host/bitnami/redis:7\n"))
+	f.Add([]byte("x: &x {image: bitnami/redis:7}\ny: *x\n"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		assertStableReport(t, func() diag.Report { return YAML("input.yaml", data) })
+	})
+}
+
+func FuzzTemplate(f *testing.F) {
+	f.Add([]byte("image: bitnami/redis:{{ .Values.tag }}\n"))
+	f.Add([]byte("{{ .Values.x | default \"bitnami/kubectl:1.30\" }}\n"))
+	f.Add([]byte("{{/* image: bitnami/not-real:1 */}}\n"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		assertStableReport(t, func() diag.Report { return Template("templates/input.yaml", data) })
+	})
+}
+
+func assertStableReport(t *testing.T, scan func() diag.Report) {
+	t.Helper()
+	first := scan()
+	second := scan()
+	if !reflect.DeepEqual(first, second) {
+		t.Fatal("scan result is not deterministic")
+	}
+	for _, finding := range first.Findings {
+		if finding.Location.Line < 1 {
+			t.Fatalf("finding has invalid line %d: %#v", finding.Location.Line, finding)
+		}
 	}
 }

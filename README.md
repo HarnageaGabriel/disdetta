@@ -114,7 +114,7 @@ exists today.
 
 | Capability | State |
 | --- | --- |
-| `scan` on repositories (Helm values and templates, `Chart.yaml`, Flux, Argo CD, Kustomize, compose, GitHub Actions, GitLab CI, Azure Pipelines, Dockerfile) | Implemented; recall measured on a [public corpus](docs/corpus.md) |
+| `scan` on repositories (Helm values and templates, `Chart.yaml`, Flux, Argo CD, Kustomize, compose, GitHub Actions, GitLab CI, Azure Pipelines, Dockerfile, Terraform) | Implemented; recall measured on a [public corpus](docs/corpus.md) |
 | `scan --cluster` (workloads, Helm releases, opt-in release Secrets) | Implemented, tested on kind |
 | Catalog of exit routes (data, each entry with a source) | PostgreSQL -> CloudNativePG (`partial`) |
 | `plan` ([docs](docs/usage/plan.md)) | PostgreSQL; Redis, Kafka, MongoDB, Keycloak need research (issues #3-#6) |

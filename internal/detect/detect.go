@@ -25,6 +25,9 @@ func YAML(path string, data []byte) diag.Report {
 	data = stripBOM(data)
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var out diag.Report
+	// The Helmfile state belongs to the file, not to one document: the
+	// documents of a file are resolved together (spec section 9).
+	var helmfileState *helmfileFile
 	for {
 		var doc yaml.Node
 		err := dec.Decode(&doc)
@@ -47,19 +50,30 @@ func YAML(path string, data []byte) diag.Report {
 			continue
 		}
 		s := walkState{path: path, data: data, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out}
+		if isHelmfile(path) {
+			if helmfileState == nil {
+				helmfileState = newHelmfileFile()
+			}
+			s.helmfile = helmfileState
+		}
 		s.scanDocument(root)
 	}
 	return out
 }
 
 type walkState struct {
-	path               string
-	keys               []string
-	globalRegistry     string
-	depthReported      bool
-	aliasLimitReported bool
-	templateComment    bool
-	shellScriptNodes   map[*yaml.Node]bool
+	path                   string
+	keys                   []string
+	globalRegistry         string
+	depthReported          bool
+	aliasLimitReported     bool
+	templateComment        bool
+	suppressedHelmfileURLs map[[2]int]bool
+	shellScriptNodes       map[*yaml.Node]bool
+	// helmfile is the state of the Helmfile file being scanned. It is
+	// shared by the documents of the file and belongs to one scan, so two
+	// scans never share it.
+	helmfile *helmfileFile
 	// data is the raw file content, used to resolve the column of a YAML
 	// block scalar's content (spec 9.2).
 	data []byte
@@ -620,7 +634,8 @@ func (s *walkState) scanFallbackScalar(n *yaml.Node, key string) {
 	if s.shellScriptNodes[n] {
 		return
 	}
-	if url, ok := chartURLIn(n.Value); ok {
+	_, suppressed := s.suppressedHelmfileURLs[[2]int{n.Line, n.Column}]
+	if url, ok := chartURLIn(n.Value); ok && !suppressed {
 		s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, n.Line, n.Column), Reference: url, Original: url, Attributes: []string{"chart"}})
 	}
 	if knownImageKeys[key] || !isWholeImageScalar(n.Value) {
