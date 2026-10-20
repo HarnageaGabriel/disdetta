@@ -665,16 +665,31 @@ func (s *walkState) scanShellValues(scripts []shellScriptValue) {
 	if len(scripts) == 0 {
 		return
 	}
+	// Every script is tokenized once: the alias prepass and the reporting
+	// pass work on the same command groups, so the tokens are kept instead of
+	// being computed twice.
+	groups := make([][][]shellToken, len(scripts))
 	aliases := map[string]bool{}
-	for _, script := range scripts {
-		_, declared := shellCommandFindings(s.path, script.value, script.origin, aliases)
-		for alias := range declared {
-			aliases[alias] = true
+	for i, script := range scripts {
+		groups[i] = shellCommandGroups(tokenizeShell(script.value))
+		for _, group := range groups[i] {
+			if alias, _, ok := helmRepoAdd(group); ok {
+				aliases[alias] = true
+			}
 		}
 	}
-	for _, script := range scripts {
-		findings, _ := shellCommandFindings(s.path, script.value, script.origin, aliases)
-		s.out.Findings = appendShellFindings(s.out.Findings, findings)
+	// The aliases the file proves are proof for every script of the file, so
+	// the effective set is built once and shared.
+	//
+	// The seen set of the findings is built once too and grows with them: the
+	// work of a file stays linear in the number of its findings.
+	seen := make(map[string]bool, len(s.out.Findings))
+	for _, f := range s.out.Findings {
+		seen[shellFindingKey(f)] = true
+	}
+	for i, script := range scripts {
+		findings := shellFindingsFromGroups(s.path, script.origin, groups[i], aliases)
+		s.out.Findings = appendShellFindings(s.out.Findings, seen, findings)
 	}
 }
 
@@ -692,11 +707,7 @@ func filepathBase(path string) string {
 // it returns only redacted references or URLs. The returned aliases are
 // Bitnami repositories declared by helm repo add in this script.
 func shellCommandFindings(path, script string, origin shellOrigin, aliases map[string]bool) ([]diag.Finding, map[string]bool) {
-	tokens := tokenizeShell(script)
-	groups := shellCommandGroups(tokens)
-	// A first pass declares the aliases the script proves, a second one
-	// reports the findings: an alias is proof whatever the order of the
-	// commands (spec 9.2).
+	groups := shellCommandGroups(tokenizeShell(script))
 	declared := map[string]bool{}
 	for _, group := range groups {
 		if alias, _, ok := helmRepoAdd(group); ok {
@@ -710,23 +721,26 @@ func shellCommandFindings(path, script string, origin shellOrigin, aliases map[s
 	for alias := range declared {
 		effective[alias] = true
 	}
+	return shellFindingsFromGroups(path, origin, groups, effective), declared
+}
 
+// shellFindingsFromGroups reports the findings of one script from the command
+// groups its tokens form, with the aliases that are proven for the file. A
+// finding that repeats another one of the same script is reported once.
+func shellFindingsFromGroups(path string, origin shellOrigin, groups [][]shellToken, aliases map[string]bool) []diag.Finding {
 	var findings []diag.Finding
 	seen := map[string]bool{}
-	add := func(f diag.Finding) {
-		key := shellFindingKey(f)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		findings = append(findings, f)
-	}
 	for _, group := range groups {
-		for _, f := range shellGroupFindings(path, group, origin, effective) {
-			add(f)
+		for _, f := range shellGroupFindings(path, group, origin, aliases) {
+			key := shellFindingKey(f)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			findings = append(findings, f)
 		}
 	}
-	return findings, declared
+	return findings
 }
 
 func shellFindingKey(f diag.Finding) string {
@@ -755,11 +769,10 @@ func itoa(v int) string {
 	return string(buf[i:])
 }
 
-func appendShellFindings(dst, incoming []diag.Finding) []diag.Finding {
-	seen := make(map[string]bool, len(dst)+len(incoming))
-	for _, f := range dst {
-		seen[shellFindingKey(f)] = true
-	}
+// appendShellFindings appends the findings that are not reported yet. The seen
+// set holds the findings that are already reported: it is built once per file
+// and grows with them, so the work stays linear in their number.
+func appendShellFindings(dst []diag.Finding, seen map[string]bool, incoming []diag.Finding) []diag.Finding {
 	for _, f := range incoming {
 		key := shellFindingKey(f)
 		if seen[key] {
