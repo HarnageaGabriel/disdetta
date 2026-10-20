@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/HarnageaGabriel/disdetta/internal/detect"
 )
 
 var (
@@ -59,7 +57,7 @@ func walkRepository(ctx context.Context, root string, visit func(repositoryEntry
 		// metadata lookup and before the relative path is built. The entries
 		// that are not regular keep their diagnostics: a link and a device are
 		// still reported as skipped.
-		if entry.Type().IsRegular() && !scannableName(strings.ToLower(filepath.Base(path)), path) {
+		if entry.Type().IsRegular() && !scannableName(path) {
 			return nil
 		}
 		display := filepath.Base(path)
@@ -80,30 +78,15 @@ func walkRepository(ctx context.Context, root string, visit func(repositoryEntry
 	})
 }
 
-// scannableName reports whether a file whose lower-cased base name is
-// lowerBase can be consumed by one of the repository detectors. It looks at
-// the name only, so the walk can decide before it looks at the metadata of
-// the file.
+// scannableName reports whether a detector reads the file named by path. It
+// looks at the name only, so the walk can decide before it looks at the
+// metadata of the file.
 //
-// The names are the ones scanFile reads: a file that is not scannable here is
-// not read by the scan either, so dropping it in the walk leaves the report
-// unchanged. The Kustomization flag of scanFile only makes a file scannable
-// when the file is the extensionless Kustomization: the other two names
-// kustomize accepts end in .yaml or .yml and are already covered.
-func scannableName(lowerBase, path string) bool {
-	if lowerBase == ".disdetta.yaml" {
-		return false
-	}
-	if strings.HasSuffix(lowerBase, ".yaml") || strings.HasSuffix(lowerBase, ".yml") {
-		return true
-	}
-	if lowerBase == "dockerfile" || strings.HasPrefix(lowerBase, "dockerfile.") || strings.HasSuffix(lowerBase, ".dockerfile") {
-		return true
-	}
-	if strings.HasSuffix(lowerBase, ".tpl") || strings.HasSuffix(lowerBase, ".yaml.gotmpl") || strings.HasSuffix(lowerBase, ".tf") {
-		return true
-	}
-	return len(lowerBase) == len("kustomization") && detect.IsKustomizationFile(path)
+// The decision is the one the scan makes: the flags of the name are the
+// flags the scan uses, so a file that is not scannable here is not read by
+// the scan either, and dropping it in the walk leaves the report unchanged.
+func scannableName(path string) bool {
+	return classifyFile(path).scanned()
 }
 
 // ReadFile performs the bounded, regular-file-only read used by repository
