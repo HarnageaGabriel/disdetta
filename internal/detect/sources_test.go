@@ -30,7 +30,10 @@ func TestSection9YAMLSources(t *testing.T) {
 		{"azure", "azure-pipelines-ci.yml", "container: bitnami/root:1\nresources: {containers: [{image: bitnami/resource:1}]}\njobs:\n- job: build\n  container: {image: bitnami/job:1}\n  services: {db: bitnami/service:1}\n", 4},
 		{"azure unrelated negative", "azure-pipelines.yml", "variables: {image: bitnami/not-container:1}\n", 0},
 		{"values variable evidence", "values.yaml", "image: '${REGISTRY}/bitnami/redis:${TAG}'\n", 1},
-		{"unrelated yaml negative", "tool.yaml", "settings: {image: bitnami/not-container:1}\n", 0},
+		{"unrelated yaml negative", "tool.yaml", "settings: {image: example/not-container:1}\n", 0},
+		// A file whose name is not a values file is a values file candidate
+		// too: its image references are reported (spec section 9).
+		{"unrelated yaml is scanned as values", "tool.yaml", "settings: {image: bitnami/not-container:1}\n", 1},
 		// review 02 F12: an anchor and its alias uses are one finding at the anchor.
 		{"alias anchor", "values.yaml", "common: &common\n  image: bitnami/redis:7\nfirst: *common\n", 1},
 	}
@@ -163,7 +166,7 @@ func TestKustomizeHelmCharts(t *testing.T) {
 				"repo: https://charts.example.invalid/postgresql\n",
 		},
 		{
-			name: "other kind uses generic chart fallback only",
+			name: "other kind uses generic chart fallback and values scan",
 			path: "generator.yaml",
 			input: "kind: NotTheGenerator\n" +
 				"name: postgresql\n" +
@@ -172,6 +175,7 @@ func TestKustomizeHelmCharts(t *testing.T) {
 				"  image: bitnamilegacy/postgresql:16.4.0\n",
 			want: []expectedFinding{
 				{rule: "DSD-CHT-001", line: 3, column: 7, component: "", impact: string(diag.ImpactUnknown)},
+				{rule: "DSD-IMG-001", line: 5, column: 10, component: "postgresql", impact: string(diag.ImpactHigh)},
 			},
 		},
 		{
