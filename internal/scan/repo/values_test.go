@@ -364,3 +364,31 @@ func TestResolveValuesFileRejectsLinkedParent(t *testing.T) {
 		t.Errorf("resolveValuesFile below a plain directory = %v, want %v", got, valuesOK)
 	}
 }
+
+func FuzzResolveValuesFile(f *testing.F) {
+	root := f.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o700); err != nil {
+		f.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		"values.yaml":     "image: bitnami/redis:7\n",
+		"sub/values.yaml": "image: bitnami/postgresql:16\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(path)), []byte(content), 0o600); err != nil {
+			f.Fatal(err)
+		}
+	}
+	for _, seed := range []string{"values.yaml", "sub/values.yaml", "../outside.yaml", "/etc/values.yaml", "", "a/../../outside.yaml"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, ref string) {
+		resolved, _, _ := resolveValuesFile(root, root, ref)
+		if resolved == "" {
+			return
+		}
+		rel, err := filepath.Rel(root, resolved)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("resolveValuesFile(%q) returned path outside root: %q", ref, resolved)
+		}
+	})
+}

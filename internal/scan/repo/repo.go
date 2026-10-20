@@ -27,6 +27,11 @@ type Options struct {
 	ConfigPath string
 	Clock      func() time.Time
 	Exclude    []string
+	// JobHook, when set, wraps the reading and the parsing of every file of
+	// the scan. It receives the position of the file in the walk order and
+	// the function that reads and parses it. It is a test seam: the tests use
+	// it to control the order in which the files are parsed.
+	JobHook func(index int, scan func() diag.Report) diag.Report
 }
 
 // Scan walks root without changing it and returns a deterministic report.
@@ -81,30 +86,38 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 	}
 	claimed, plans, valuesReport := planValuesFiles(root, entries, options.Exclude)
 	appendReport(&out, valuesReport)
+	// The walk decides which files are scanned and in which order. The files
+	// are then read and parsed by a bounded pool of workers, and the results
+	// are merged in walk order, so the report never depends on the order in
+	// which the files were parsed.
+	workers := workerCount()
+	steps := make([]scanStep, 0, len(entries))
+	jobs := make([]fileJob, 0, len(entries))
 	for _, entry := range entries {
 		if entry.problem == 0 && claimed[pathKey(entry.path)] {
 			continue // scanned once below, as chart values
 		}
-		switch entry.problem {
-		case walkPathUnreadable:
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "path could not be read"))
-			continue
-		case walkSymlink:
-			out.Summary.FilesSkipped++
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "symbolic link skipped"))
-			continue
-		case walkMetadataUnreadable:
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "file metadata could not be read"))
-			continue
-		case walkNonRegular:
-			out.Summary.FilesSkipped++
-			out.Diagnostics = append(out.Diagnostics, scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "non-regular file skipped"))
+		if entry.problem != 0 {
+			steps = append(steps, scanStep{entry: entry, job: -1})
 			continue
 		}
-		appendReport(&out, scanFile(entry.path, entry.display, entry.info))
+		steps = append(steps, scanStep{entry: entry, job: len(jobs)})
+		jobs = append(jobs, fileJob{path: entry.path, display: entry.display, info: entry.info})
 	}
+	reports := runPool(workers, jobs, options.scanJob)
+	for _, step := range steps {
+		if step.job < 0 {
+			out.Diagnostics = append(out.Diagnostics, walkDiagnostic(step.entry, &out))
+			continue
+		}
+		appendReport(&out, reports[step.job])
+	}
+	planJobs := make([]fileJob, 0, len(plans))
 	for _, plan := range plans {
-		appendReport(&out, scanValuesFile(plan))
+		planJobs = append(planJobs, fileJob{path: plan.path, display: plan.display})
+	}
+	for _, planReport := range runPool(workers, planJobs, scanValuesJob) {
+		appendReport(&out, planReport)
 	}
 	finalize(&out)
 	configPath := options.ConfigPath
@@ -132,6 +145,51 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 	}
 	return out, nil
 }
+
+// scanStep is one walked file: either a file the walk could not read, which
+// has no job, or a file the pool reads and parses, which has one.
+type scanStep struct {
+	entry repositoryEntry
+	job   int
+}
+
+// walkDiagnostic returns the diagnostic of a file the walk could not read and
+// counts the files it skipped.
+func walkDiagnostic(entry repositoryEntry, out *diag.Report) diag.Diagnostic {
+	switch entry.problem {
+	case walkPathUnreadable:
+		return scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "path could not be read")
+	case walkSymlink:
+		out.Summary.FilesSkipped++
+		return scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "symbolic link skipped")
+	case walkMetadataUnreadable:
+		return scanDiagnostic("DSD-SCN-004", diag.LevelError, entry.display, "file metadata could not be read")
+	case walkNonRegular:
+		out.Summary.FilesSkipped++
+		return scanDiagnostic("DSD-SCN-002", diag.LevelWarning, entry.display, "non-regular file skipped")
+	}
+	return diag.Diagnostic{}
+}
+
+// scanJob reads and parses one walked file. The hook of the options, when
+// set, wraps the reading and the parsing of the file.
+func (o Options) scanJob(index int, job fileJob) diag.Report {
+	if o.JobHook == nil {
+		return scanFileJob(job)
+	}
+	return o.JobHook(index, func() diag.Report { return scanFileJob(job) })
+}
+
+// scanFileJob reads and parses one walked file.
+func scanFileJob(job fileJob) diag.Report {
+	return scanFile(job.path, job.display, job.info)
+}
+
+// scanValuesJob reads and parses one resolved values file as chart values.
+func scanValuesJob(_ int, job fileJob) diag.Report {
+	return scanValuesFile(valuesPlan{path: job.path, display: job.display})
+}
+
 func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	lower := strings.ToLower(info.Name())
 	if lower == ".disdetta.yaml" {
@@ -140,7 +198,7 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile")
 	kustomization := detect.IsKustomizationFile(path)
-	templateText := strings.HasSuffix(lower, ".tpl") || (yamlFile && underChartTemplates(path))
+	templateText := strings.HasSuffix(lower, ".tpl") || strings.HasSuffix(lower, ".yaml.gotmpl") || (yamlFile && underChartTemplates(path))
 	terraformFile := strings.HasSuffix(lower, ".tf")
 	if !yamlFile && !dockerfile && !kustomization && !templateText && !terraformFile {
 		return out

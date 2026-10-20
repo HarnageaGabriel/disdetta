@@ -1,0 +1,24 @@
+repositories:
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+  - name: oci
+    url: registry-1.docker.io/bitnamicharts
+    oci: true
+  - name: oci-unused
+    url: oci://registry-1.docker.io/bitnamicharts
+    oci: true
+  - name: stable
+    url: https://charts.example.com/stable
+releases:
+  - name: db
+    chart: bitnami/postgresql
+    values:
+      - image: {repository: bitnamilegacy/postgresql}
+  - name: cache
+    chart: oci/redis
+  - name: direct
+    chart: oci://registry-1.docker.io/bitnamicharts/nginx
+  - name: web
+    chart: stable/nginx
+    values:
+      - values/postgresql.yaml
