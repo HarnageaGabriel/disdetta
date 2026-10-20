@@ -65,15 +65,10 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 	// report prose or echo arguments that the shell tokenizer must ignore.
 	// Any other scalar of the same file still falls back (spec section 9).
 	s.scanShellScripts(root)
-	// Whole-scalar fallback (spec section 9): unknown-key image scalars and
-	// Bitnami chart repository URLs inside any scalar, in any file. A scalar a
-	// specific detector already reported is not reported again.
-	before := len(s.out.Findings)
-	s.scanFallbacks(root)
-	s.dropDuplicateFallbacks(before)
-	// An anchor and its alias uses are one logical reference, reported once at
-	// the anchor (spec section 5).
-	s.out.Findings = diag.DedupeFindings(s.out.Findings)
+	// The whole-scalar fallback (spec section 9) and the deduplication
+	// (spec section 5) are one pass over the findings of the file, not one
+	// pass per document: the caller runs the fallback of the document with
+	// the state of the file, and deduplicates the findings of the file once.
 }
 
 func (s *walkState) scanCharts(root *yaml.Node) {
@@ -122,7 +117,7 @@ func (s *walkState) scanVendoredChart(root *yaml.Node) {
 	if component != "" {
 		impact = catalog.Impact(component)
 	}
-	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-002", Severity: diag.SeverityMedium, Confidence: confidence, Impact: impact, Component: component, Location: loc(s.path, evidence.Line, evidence.Column), Reference: reference, Original: reference, Attributes: attrs})
+	s.addFinding(diag.Finding{RuleID: "DSD-CHT-002", Severity: diag.SeverityMedium, Confidence: confidence, Impact: impact, Component: component, Location: loc(s.path, evidence.Line, evidence.Column), Reference: reference, Original: reference, Attributes: attrs})
 }
 
 func isBitnamiChartsURL(v string) bool {
@@ -354,6 +349,10 @@ func HelmValues(path string, data []byte) diag.Report {
 	data = stripBOM(data)
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var out diag.Report
+	// The state belongs to the file, not to one document: the whole-scalar
+	// fallback and the deduplication are one pass over the findings of the
+	// file, never one pass per document (spec sections 5 and 9).
+	file := fileScan{fallbackSeen: map[string]bool{}}
 	for {
 		var doc yaml.Node
 		err := dec.Decode(&doc)
@@ -375,14 +374,20 @@ func HelmValues(path string, data []byte) diag.Report {
 		if strings.EqualFold(valueAt(root, "kind"), "Secret") {
 			continue
 		}
-		s := walkState{path: path, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out}
+		s := walkState{path: path, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out, file: &file}
 		s.scanConfig(root)
 		s.scanImages(root, false)
-		before := len(s.out.Findings)
-		s.scanFallbacks(root)
-		s.dropDuplicateFallbacks(before)
-		s.out.Findings = diag.DedupeFindings(s.out.Findings)
+		from := len(out.Findings)
+		s.scanFallback(root, from)
+		if file.limitHit {
+			// The file reached the per-file finding limit: the rest of the
+			// file is not scanned (spec section 3).
+			break
+		}
 	}
+	// The deduplication runs once per file (spec section 5).
+	out.Findings = diag.DedupeFindings(out.Findings)
+	reportFindingLimit(&out, path, &file)
 	return out
 }
 
@@ -463,7 +468,7 @@ func (s *walkState) addChartAt(n *yaml.Node, component string) {
 	if component != "" {
 		impact = catalog.Impact(component)
 	}
-	s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: impact, Component: component, Location: loc(s.path, n.Line, n.Column), Reference: strings.TrimSpace(n.Value), Original: strings.TrimSpace(n.Value), Attributes: []string{"chart"}})
+	s.addFinding(diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: impact, Component: component, Location: loc(s.path, n.Line, n.Column), Reference: strings.TrimSpace(n.Value), Original: strings.TrimSpace(n.Value), Attributes: []string{"chart"}})
 }
 func (s *walkState) scanImages(n *yaml.Node, embedded bool) {
 	s.scanImagesAt(n, embedded, 0, map[*yaml.Node]bool{}, new(int))

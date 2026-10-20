@@ -22,6 +22,11 @@ var skippedDirectories = map[string]bool{".git": true, "node_modules": true, "ve
 // MaxFileSize is the largest file scanned; larger files produce DSD-SCN-008.
 const MaxFileSize = 16 * 1024 * 1024
 
+// MaxFindingsPerRepository bounds the findings a repository scan reports (spec
+// section 3). A repository with more findings keeps the first ones, in the
+// contract order, and reports the limit as a DSD-SCN-005 warning.
+const MaxFindingsPerRepository = diag.MaxFindingsPerRepository
+
 // Options controls repository scanning integrations.
 type Options struct {
 	ConfigPath string
@@ -57,7 +62,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 		}
 		if !resolvedInfo.IsDir() {
 			r := diag.Report{Summary: diag.Summary{FilesSkipped: 1}, Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "symbolic-link root file skipped")}}
-			finalize(&r)
+			finalize(&r, original)
 			return r, nil
 		}
 		root, info = resolved, resolvedInfo
@@ -65,11 +70,11 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
 			r := diag.Report{Summary: diag.Summary{FilesSkipped: 1}, Diagnostics: []diag.Diagnostic{scanDiagnostic("DSD-SCN-002", diag.LevelWarning, filepath.Base(root), "non-regular file skipped")}}
-			finalize(&r)
+			finalize(&r, original)
 			return r, nil
 		}
 		r := scanFile(root, filepath.Base(root), info)
-		finalize(&r)
+		finalize(&r, original)
 		return r, nil
 	}
 	var out diag.Report
@@ -119,7 +124,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 	for _, planReport := range runPool(workers, planJobs, scanValuesJob) {
 		appendReport(&out, planReport)
 	}
-	finalize(&out)
+	finalize(&out, original)
 	configPath := options.ConfigPath
 	if configPath == "" {
 		configPath = filepath.Join(root, ".disdetta.yaml")
@@ -139,7 +144,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 			displayConfig = filepath.ToSlash(rel)
 		}
 		applyIgnores(&out, entries, now, displayConfig)
-		finalize(&out)
+		finalize(&out, original)
 	} else if options.ConfigPath != "" || !errors.Is(configErr, os.ErrNotExist) {
 		return diag.Report{}, fmt.Errorf("read ignore file %s: %w", configPath, configErr)
 	}
@@ -284,9 +289,18 @@ func scanDiagnostic(code string, level diag.Level, path, message string) diag.Di
 // fingerprints and summary fields. Occurrences are numbered after sorting, in
 // source order, so detector map iteration order never reaches the output
 // (spec sections 4, 5).
-func finalize(r *diag.Report) {
+func finalize(r *diag.Report, root string) {
 	r.Findings = diag.DedupeFindings(r.Findings)
 	Sort(r)
+	// The repository finding limit bounds the report of a hostile repository:
+	// the first findings are kept, in the contract order, and the limit is
+	// reported as DSD-SCN-005. It is never a silent truncation (spec
+	// section 3).
+	if kept, dropped := diag.CapFindings(r.Findings, MaxFindingsPerRepository); dropped {
+		r.Findings = kept
+		r.Diagnostics = append(r.Diagnostics, scanDiagnostic("DSD-SCN-005", diag.LevelWarning, filepath.Base(root), fmt.Sprintf("finding limit reached: %d findings per repository", MaxFindingsPerRepository)))
+		Sort(r)
+	}
 	occ := map[string]int{}
 	for i := range r.Findings {
 		f := &r.Findings[i]

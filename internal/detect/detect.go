@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/catalog"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"github.com/HarnageaGabriel/disdetta/internal/imageref"
@@ -20,6 +21,11 @@ const (
 	maxDockerfileLine = 1024 * 1024
 )
 
+// MaxFindingsPerFile bounds the findings one scanned file reports (spec
+// section 3). A file with more findings keeps the first ones, in the order
+// they were found, and reports the limit as a DSD-SCN-005 warning.
+const MaxFindingsPerFile = diag.MaxFindingsPerFile
+
 // MaxDockerfileContinuationLines bounds the continuation lines of one logical
 // Dockerfile instruction (spec section 3). A longer chain is not scanned and is
 // reported as a DSD-SCN-005 warning.
@@ -30,6 +36,10 @@ func YAML(path string, data []byte) diag.Report {
 	data = stripBOM(data)
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var out diag.Report
+	// The state belongs to the file, not to one document: the whole-scalar
+	// fallback and the deduplication are one pass over the findings of the
+	// file, never one pass per document (spec sections 5 and 9).
+	file := fileScan{fallbackSeen: map[string]bool{}}
 	// The Helmfile state belongs to the file, not to one document: the
 	// documents of a file are resolved together (spec section 9).
 	var helmfileState *helmfileFile
@@ -54,16 +64,55 @@ func YAML(path string, data []byte) diag.Report {
 		if strings.EqualFold(findString(root, []string{"kind"}), "Secret") {
 			continue
 		}
-		s := walkState{path: path, data: data, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out}
+		s := walkState{path: path, data: data, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out, file: &file}
 		if isHelmfile(path) {
 			if helmfileState == nil {
 				helmfileState = newHelmfileFile()
 			}
 			s.helmfile = helmfileState
 		}
+		from := len(out.Findings)
 		s.scanDocument(root)
+		s.scanFallback(root, from)
+		if file.limitHit {
+			// The file reached the per-file finding limit: the rest of the
+			// file is not scanned, so the cost of the scan stays bounded
+			// (spec section 3).
+			break
+		}
 	}
+	// The deduplication runs once per file: an anchor and its alias uses are
+	// one logical reference, reported once at the anchor (spec section 5).
+	out.Findings = diag.DedupeFindings(out.Findings)
+	reportFindingLimit(&out, path, &file)
 	return out
+}
+
+// fileScan is the state one scanned file shares with its documents: the
+// findings already reported and the limits that bound the scan (spec
+// sections 3 and 9). It is built once per file, so the documents of a file
+// never rebuild it.
+type fileScan struct {
+	// fallbackSeen holds the keys of the findings already reported, so the
+	// whole-scalar fallback of a document is compared with the findings of
+	// the whole file without rebuilding a map (spec section 9).
+	fallbackSeen map[string]bool
+	// limitHit records that the per-file finding limit was reached.
+	limitHit bool
+	// limitLocation is the position of the first finding that was not kept.
+	limitLocation diag.Location
+}
+
+// reportFindingLimit bounds the findings of a file to the per-file limit and
+// reports the limit as a DSD-SCN-005 diagnostic (spec section 3). The limit is
+// never a silent truncation.
+func reportFindingLimit(out *diag.Report, path string, file *fileScan) {
+	kept, dropped := diag.CapFindings(out.Findings, MaxFindingsPerFile)
+	out.Findings = kept
+	if !dropped && !file.limitHit {
+		return
+	}
+	out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, file.limitLocation.Line, file.limitLocation.Column, fmt.Sprintf("finding limit reached: %d findings per file", MaxFindingsPerFile)))
 }
 
 type walkState struct {
@@ -82,6 +131,11 @@ type walkState struct {
 	// data is the raw file content, used to resolve the column of a YAML
 	// block scalar's content (spec 9.2).
 	data []byte
+	// file is the state of the file being scanned, shared by its documents.
+	// It holds the findings already reported and the per-file finding
+	// limit (spec sections 3 and 9). It is nil for a scan of one document
+	// that has no file state.
+	file *fileScan
 	out  *diag.Report
 }
 
@@ -103,7 +157,7 @@ func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
 			if pathEnds(s.keys, "global", "security", "allowInsecureImages") && v.Tag == "!!bool" {
 				var enabled bool
 				if v.Decode(&enabled) == nil && enabled {
-					s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CFG-001", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, v.Line+lineOffset, v.Column), Reference: "true", Original: "true", Attributes: []string{}})
+					s.addFinding(diag.Finding{RuleID: "DSD-CFG-001", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, v.Line+lineOffset, v.Column), Reference: "true", Original: "true", Attributes: []string{}})
 				}
 			}
 			if k.Value == "image" {
@@ -125,7 +179,7 @@ func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
 				if component != "" {
 					impact = catalog.Impact(component)
 				}
-				s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: impact, Component: component, Location: loc(s.path, v.Line+lineOffset, v.Column), Reference: strings.TrimSpace(v.Value), Original: strings.TrimSpace(v.Value), Attributes: []string{"chart"}})
+				s.addFinding(diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: impact, Component: component, Location: loc(s.path, v.Line+lineOffset, v.Column), Reference: strings.TrimSpace(v.Value), Original: strings.TrimSpace(v.Value), Attributes: []string{"chart"}})
 			}
 			if k.Value == "uses" && v.Kind == yaml.ScalarNode && strings.HasPrefix(v.Value, "docker://") {
 				s.addImage(strings.TrimPrefix(v.Value, "docker://"), v.Line+lineOffset, v.Column, embedded)
@@ -185,8 +239,23 @@ func (s *walkState) addRefConfidence(r imageref.Reference, line, column int, emb
 	case unresolved:
 		s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-003", diag.LevelInfo, s.path, line, column, "unresolved reference without Bitnami evidence"))
 	case ok:
-		s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: c.Rule, Severity: c.Severity, Confidence: c.Confidence, Impact: c.Impact, Component: c.Component, Location: loc(s.path, line, column), Reference: c.Reference, Original: c.Original, Attributes: c.Attributes})
+		s.addFinding(diag.Finding{RuleID: c.Rule, Severity: c.Severity, Confidence: c.Confidence, Impact: c.Impact, Component: c.Component, Location: loc(s.path, line, column), Reference: c.Reference, Original: c.Original, Attributes: c.Attributes})
 	}
+}
+
+// addFinding reports one finding of the file. The per-file finding limit
+// bounds the report of a hostile file: the first findings are kept, in the
+// order they were found, and the limit is reported once as DSD-SCN-005
+// (spec section 3).
+func (s *walkState) addFinding(f diag.Finding) {
+	if s.file != nil && len(s.out.Findings) >= MaxFindingsPerFile {
+		if !s.file.limitHit {
+			s.file.limitHit = true
+			s.file.limitLocation = f.Location
+		}
+		return
+	}
+	s.out.Findings = append(s.out.Findings, f)
 }
 
 // Classification is the v0.1 rule-selection outcome for one image reference
@@ -284,7 +353,7 @@ func (s *walkState) scanConfigAt(n *yaml.Node, depth int) {
 		if v := nodeAt(n, "global", "security", "allowInsecureImages"); v != nil && v.Tag == "!!bool" {
 			var enabled bool
 			if v.Decode(&enabled) == nil && enabled {
-				s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CFG-001", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, v.Line, v.Column), Reference: "true", Original: "true", Attributes: []string{}})
+				s.addFinding(diag.Finding{RuleID: "DSD-CFG-001", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, v.Line, v.Column), Reference: "true", Original: "true", Attributes: []string{}})
 			}
 		}
 	}
@@ -300,7 +369,8 @@ func Dockerfile(path string, data []byte) diag.Report {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), maxDockerfileLine)
 	line, start := 0, 0
-	s := walkState{path: path, out: &out}
+	file := fileScan{fallbackSeen: map[string]bool{}}
+	s := walkState{path: path, out: &out, file: &file}
 	args, stages := map[string]string{}, map[string]bool{}
 	seenFrom := false
 	// The parts of the logical instruction are collected and joined once, so
@@ -420,6 +490,7 @@ func Dockerfile(path string, data []byte) diag.Report {
 		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, line+1, 1, "Dockerfile line length limit reached"))
 	}
 	s.scanShellValues(shellRuns)
+	reportFindingLimit(&out, path, &file)
 	return out
 }
 
@@ -617,6 +688,26 @@ var bitnamiChartURLs = []string{
 	"oci://docker.io/bitnamicharts",
 }
 
+// scanFallback reports the whole-scalar fallback findings of one document and
+// drops the ones that repeat a finding already reported (spec section 9).
+// from is the index of the first finding the specific detectors of the
+// document reported. The state is the one of the file: the map of the reported
+// findings is built once and updated as the documents are scanned, so the
+// fallback costs the findings of the document and never the findings of the
+// whole file.
+func (s *walkState) scanFallback(root *yaml.Node, from int) {
+	before := len(s.out.Findings)
+	s.scanFallbacks(root)
+	if s.file != nil {
+		// The findings the specific detectors of the document reported are
+		// the ones a fallback must not repeat.
+		for _, f := range s.out.Findings[from:before] {
+			s.file.fallbackSeen[fallbackKey(f)] = true
+		}
+	}
+	s.dropDuplicateFallbacks(before)
+}
+
 // dropDuplicateFallbacks removes whole-scalar fallback findings that repeat a
 // rule already reported at the same file and line by a specific detector, or by
 // an earlier fallback finding: one scalar is never counted twice (spec section
@@ -625,9 +716,14 @@ func (s *walkState) dropDuplicateFallbacks(from int) {
 	if from >= len(s.out.Findings) {
 		return
 	}
-	seen := make(map[string]bool, len(s.out.Findings))
-	for _, f := range s.out.Findings[:from] {
-		seen[fallbackKey(f)] = true
+	var seen map[string]bool
+	if s.file != nil {
+		seen = s.file.fallbackSeen
+	} else {
+		seen = make(map[string]bool, from)
+		for _, f := range s.out.Findings[:from] {
+			seen[fallbackKey(f)] = true
+		}
 	}
 	kept := s.out.Findings[:from]
 	for _, f := range s.out.Findings[from:] {
@@ -677,7 +773,7 @@ func (s *walkState) scanFallbackScalar(n *yaml.Node, key string) {
 	}
 	_, suppressed := s.suppressedHelmfileURLs[[2]int{n.Line, n.Column}]
 	if url, ok := chartURLIn(n.Value); ok && !suppressed {
-		s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, n.Line, n.Column), Reference: url, Original: url, Attributes: []string{"chart"}})
+		s.addFinding(diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, n.Line, n.Column), Reference: url, Original: url, Attributes: []string{"chart"}})
 	}
 	if knownImageKeys[key] || !isWholeImageScalar(n.Value) {
 		return
