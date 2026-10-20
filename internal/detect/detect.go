@@ -26,6 +26,11 @@ const (
 // they were found, and reports the limit as a DSD-SCN-005 warning.
 const MaxFindingsPerFile = diag.MaxFindingsPerFile
 
+// MaxDockerfileContinuationLines bounds the continuation lines of one logical
+// Dockerfile instruction (spec section 3). A longer chain is not scanned and is
+// reported as a DSD-SCN-005 warning.
+const MaxDockerfileContinuationLines = 10000
+
 // YAML inspects all YAML documents and retains one-based positions.
 func YAML(path string, data []byte) diag.Report {
 	data = stripBOM(data)
@@ -368,45 +373,81 @@ func Dockerfile(path string, data []byte) diag.Report {
 	s := walkState{path: path, out: &out, file: &file}
 	args, stages := map[string]string{}, map[string]bool{}
 	seenFrom := false
-	logical := ""
-	rawLogical := ""
+	// The parts of the logical instruction are collected and joined once, so
+	// a long continuation chain is built in linear time (spec section 3).
+	var parts []string
+	var raw strings.Builder
+	inInstruction := false
+	continuations := 0
+	dropped := false
+	limitReported := false
 	var heredocs []heredoc
 	var shellRuns []shellScriptValue
 	for scanner.Scan() {
 		line++
+		text := scanner.Text()
 		if len(heredocs) > 0 {
 			// Heredoc bodies are shell or file content, never Dockerfile
 			// instructions: skip until the matching terminator (spec section 9).
-			if heredocs[0].terminates(scanner.Text()) {
+			if heredocs[0].terminates(text) {
 				heredocs = heredocs[1:]
 			}
 			continue
 		}
-		part := strings.TrimSpace(scanner.Text())
-		if logical == "" {
-			start = line
-			rawLogical = scanner.Text()
-		} else {
-			rawLogical += "\n" + scanner.Text()
-		}
+		part := strings.TrimSpace(text)
 		continued := strings.HasSuffix(part, "\\")
 		part = strings.TrimSpace(strings.TrimSuffix(part, "\\"))
-		logical += " " + part
+		if !inInstruction {
+			start = line
+			inInstruction = true
+			continuations = 0
+			dropped = false
+			parts = parts[:0]
+			raw.Reset()
+			raw.WriteString(text)
+		} else {
+			continuations++
+			if continuations > MaxDockerfileContinuationLines {
+				// The chain is longer than the limit: the instruction is not
+				// scanned and the rest of the chain is read but not kept, so
+				// the next instructions are still scanned (spec section 3).
+				dropped = true
+				parts = parts[:0]
+				raw.Reset()
+				if !limitReported {
+					limitReported = true
+					out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, start, 1, "limit reached: Dockerfile continuation lines"))
+				}
+			}
+			if !dropped {
+				raw.WriteString("\n")
+				raw.WriteString(text)
+			}
+			if dropped {
+				if !continued {
+					inInstruction = false
+				}
+				continue
+			}
+		}
+		parts = append(parts, part)
 		if continued {
 			continue
 		}
-		instruction := strings.TrimSpace(logical)
-		logical = ""
+		inInstruction = false
+		instruction := strings.TrimSpace(strings.Join(parts, " "))
+		parts = parts[:0]
 		heredocs = heredocDelimiters(instruction)
 		f := strings.Fields(instruction)
 		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
 			continue
 		}
 		if len(heredocs) == 0 && strings.EqualFold(f[0], "RUN") {
-			raw := strings.TrimLeft(rawLogical, " \t")
-			prefix := len(rawLogical) - len(raw)
-			if len(raw) >= len(f[0]) {
-				content, removed := stripDockerRunFlags(raw[len(f[0]):])
+			rawText := raw.String()
+			rawValue := strings.TrimLeft(rawText, " \t")
+			prefix := len(rawText) - len(rawValue)
+			if len(rawValue) >= len(f[0]) {
+				content, removed := stripDockerRunFlags(rawValue[len(f[0]):])
 				shellRuns = append(shellRuns, shellScriptValue{value: content, origin: shellOrigin{line: start, column: prefix + len(f[0]) + 1 + removed}})
 			}
 		}
