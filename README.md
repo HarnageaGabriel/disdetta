@@ -135,6 +135,7 @@ stable `DSD-*` codes ([docs/diagnostics](docs/diagnostics/README.md)).
 
 See [docs/PLAN.md](docs/PLAN.md). Study notes with sources and open
 `VERIFY:` items: [docs/research/RESEARCH-NOTES.md](docs/research/RESEARCH-NOTES.md).
+Scan benchmarks and how to reproduce them: [docs/performance.md](docs/performance.md).
 
 1. Repository scan hardening and wider coverage (templates, GitLab, Azure, Kustomize, Dockerfile `ARG`).
 2. Cluster scan (read-only).
