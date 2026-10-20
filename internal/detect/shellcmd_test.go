@@ -1153,42 +1153,44 @@ func TestDockerfileRunShellCommands(t *testing.T) {
 // Source: docs/spec/v0.1.md section 9.2: the scan of a CI file is linear in the
 // number of its script steps. A file with 20000 steps is scanned in a fraction
 // of a second: the guard ends the test after 60 seconds, and the budget fails
-// it on a quadratic detector, which needs 15 seconds for the same file.
+// it on a quadratic detector, which needs 15 seconds for the same file. The
+// file reports its first MaxFindingsPerFile findings (spec section 3), so the
+// last finding is the one at the limit.
 func TestShellScanManySteps(t *testing.T) {
 	const steps = 20000
 	tests := []struct {
 		name, path                     string
 		data                           []byte
 		wantFirstLine, wantFirstColumn int
-		wantLastLine                   int
 	}{
 		{
 			name: "github actions steps", path: ".github/workflows/ci.yaml",
 			data:          shellWorkflowSteps(steps),
-			wantFirstLine: 4, wantFirstColumn: 25, wantLastLine: 20003,
+			wantFirstLine: 4, wantFirstColumn: 25,
 		},
 		{
 			name: "gitlab script lines", path: ".gitlab-ci.yml",
 			data:          shellGitLabScriptLines(steps),
-			wantFirstLine: 3, wantFirstColumn: 18, wantLastLine: 20002,
+			wantFirstLine: 3, wantFirstColumn: 18,
 		},
 		{
 			name: "azure steps", path: "azure-pipelines.yml",
 			data:          shellAzureSteps(steps),
-			wantFirstLine: 2, wantFirstColumn: 24, wantLastLine: 20001,
+			wantFirstLine: 2, wantFirstColumn: 24,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			findings, elapsed := scanFileWithin(t, tt.path, tt.data, 60*time.Second)
-			if len(findings) != steps {
-				t.Fatalf("source docs/spec/v0.1.md section 9.2: got %d findings, want %d", len(findings), steps)
+			if len(findings) != MaxFindingsPerFile {
+				t.Fatalf("source docs/spec/v0.1.md section 3: got %d findings, want the limit %d", len(findings), MaxFindingsPerFile)
 			}
 			first := findings[0]
 			if first.RuleID != "DSD-IMG-002" || first.Location.Line != tt.wantFirstLine || first.Location.Column != tt.wantFirstColumn {
 				t.Fatalf("source docs/spec/v0.1.md section 9.2: got %#v", first)
 			}
-			if last := findings[len(findings)-1]; last.Location.Line != tt.wantLastLine {
+			wantLastLine := tt.wantFirstLine + MaxFindingsPerFile - 1
+			if last := findings[len(findings)-1]; last.Location.Line != wantLastLine {
 				t.Fatalf("source docs/spec/v0.1.md section 9.2: got %#v", last)
 			}
 			if elapsed > 5*time.Second {
