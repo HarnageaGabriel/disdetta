@@ -66,6 +66,26 @@ type terraformFinding struct {
 	column     int
 }
 
+// terraformLimit asserts that a report carries exactly one DSD-SCN-005
+// diagnostic, at a position, and no finding: a limit is reported once and
+// the file is never scanned silently (spec section 3).
+func terraformLimit(t *testing.T, got diag.Report, line, column int) {
+	t.Helper()
+	if len(got.Findings) != 0 {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got findings %+v, want none", got.Findings)
+	}
+	if len(got.Diagnostics) != 1 {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got diagnostics %+v, want one DSD-SCN-005", got.Diagnostics)
+	}
+	d := got.Diagnostics[0]
+	if d.Code != "DSD-SCN-005" {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got diagnostic %+v, want DSD-SCN-005", d)
+	}
+	if d.Location.Line != line || d.Location.Column != column {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got DSD-SCN-005 at %d:%d, want %d:%d", d.Location.Line, d.Location.Column, line, column)
+	}
+}
+
 func TestTerraformHelmRelease(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -162,6 +182,42 @@ func TestTerraformHelmRelease(t *testing.T) {
 			},
 		},
 		{
+			name:  "yamlencode unknown key image is a fallback finding",
+			input: "resource \"helm_release\" \"db\" { values = [yamlencode({ custom = \"bitnami/redis\" })] }",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-003", severity: diag.SeverityMedium, confidence: diag.ConfidenceInferred, at: "\"bitnami/redis"},
+			},
+		},
+		{
+			name:  "yamlencode chart repository url is a chart finding",
+			input: "resource \"helm_release\" \"db\" { values = [yamlencode({ note = \"https://charts.bitnami.com/bitnami\" })] }",
+			findings: []terraformWant{
+				{rule: "DSD-CHT-001", severity: diag.SeverityMedium, confidence: diag.ConfidenceConfirmed, at: "\"https://charts.bitnami.com/bitnami"},
+			},
+		},
+		{
+			name:  "yamlencode list leaf is a fallback finding",
+			input: "resource \"helm_release\" \"db\" { values = [yamlencode({ custom = [\"bitnami/redis\"] })] }",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-003", severity: diag.SeverityMedium, confidence: diag.ConfidenceInferred, at: "\"bitnami/redis"},
+			},
+		},
+		{
+			name:  "yamlencode nested list of objects is scanned",
+			input: "resource \"helm_release\" \"db\" { values = [yamlencode({ custom = [{ image = { repository = \"bitnami/redis\", tag = \"7.2.0\" } }] })] }",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-002", severity: diag.SeverityHigh, confidence: diag.ConfidenceConfirmed, at: "\"bitnami/redis"},
+			},
+		},
+		{
+			name:  "yamlencode list with a dynamic element keeps the literal sibling",
+			input: "resource \"helm_release\" \"db\" { values = [yamlencode({ custom = [\"bitnami/redis\", var.other] })] }",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-003", severity: diag.SeverityMedium, confidence: diag.ConfidenceInferred, at: "\"bitnami/redis"},
+			},
+			diagnostics: []terraformWantDiagnostic{{code: "DSD-SCN-003", at: "var.other"}},
+		},
+		{
 			name:  "yamlencode triple with a mirror registry",
 			input: "resource \"helm_release\" \"db\" {\n  values = [yamlencode({\n    global = {\n      imageRegistry = \"mirror.example.com\"\n    }\n    image = {\n      repository = \"bitnami/redis\"\n      tag        = \"7.2.0\"\n    }\n  })]\n}",
 			findings: []terraformWant{
@@ -173,6 +229,48 @@ func TestTerraformHelmRelease(t *testing.T) {
 			input: "resource \"helm_release\" \"db\" {\n  values = [<<-EOT\n    image:\n      repository: bitnami/redis\n      tag: \"7.2.0\"\n  EOT\n  ]\n}",
 			findings: []terraformWant{
 				{rule: "DSD-IMG-002", severity: diag.SeverityHigh, confidence: diag.ConfidenceConfirmed, at: "bitnami/redis"},
+			},
+		},
+		{
+			name:  "embedded yaml alias is followed",
+			input: "resource \"helm_release\" \"db\" {\n  values = [<<-EOT\n    base: &base\n      repository: bitnami/redis\n    image: *base\n  EOT\n  ]\n}",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-003", severity: diag.SeverityMedium, confidence: diag.ConfidenceConfirmed, at: "bitnami/redis"},
+			},
+		},
+		{
+			// The YAML node of an anchored scalar starts at the anchor,
+			// so the finding points at "&img" and not at the value.
+			name:  "embedded yaml scalar alias keeps the referring key",
+			input: "resource \"helm_release\" \"db\" {\n  values = [<<-EOT\n    img: &img bitnami/redis:7\n    image: *img\n  EOT\n  ]\n}",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-002", severity: diag.SeverityHigh, confidence: diag.ConfidenceConfirmed, at: "&img"},
+			},
+		},
+		{
+			name:  "embedded yaml scalar alias under an image key is reported once",
+			input: "resource \"helm_release\" \"db\" {\n  values = [<<-EOT\n    image: &img bitnami/redis:7\n    other: *img\n  EOT\n  ]\n}",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-002", severity: diag.SeverityHigh, confidence: diag.ConfidenceConfirmed, at: "&img"},
+			},
+		},
+		{
+			name:  "embedded yaml helm template tag is an unresolved image",
+			input: "resource \"helm_release\" \"db\" {\n  values = [<<-EOL\n    image:\n      repository: \"bitnami/redis\"\n      tag: \"{{ .Values.image.tag }}\"\n  EOL\n  ]\n}",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-002", severity: diag.SeverityHigh, confidence: diag.ConfidenceUnresolved, at: "\"bitnami/redis"},
+			},
+		},
+		{
+			name:        "embedded yaml helm template without evidence is unresolved",
+			input:       "resource \"helm_release\" \"db\" {\n  values = [<<-EOL\n    image:\n      repository: \"{{ .Values.image.repository }}\"\n  EOL\n  ]\n}",
+			diagnostics: []terraformWantDiagnostic{{code: "DSD-SCN-003", at: "\"{{ .Values.image.repository }}\""}},
+		},
+		{
+			name:  "embedded yaml helm template under an unknown key keeps the static part",
+			input: "resource \"helm_release\" \"db\" {\n  values = [<<-EOL\n    customImage: \"bitnami/redis:{{ .Values.tag }}\"\n  EOL\n  ]\n}",
+			findings: []terraformWant{
+				{rule: "DSD-IMG-002", severity: diag.SeverityHigh, confidence: diag.ConfidenceUnresolved, at: "\"bitnami/redis:{{ .Values.tag }}\""},
 			},
 		},
 		{
@@ -447,6 +545,79 @@ func TestTerraformNodeLimit(t *testing.T) {
 	got := Terraform("main.tf", []byte(b.String()))
 	if len(got.Findings) != 0 || len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "DSD-SCN-005" {
 		t.Fatalf("source docs/spec/v0.1.md section 3: %#v", got)
+	}
+}
+
+// TestTerraformValuesObjectNodeLimit checks that every attribute of a
+// yamlencode object counts toward the node budget: a wide object is
+// reported once, at the file (the budget covers the whole file), and not
+// scanned (spec section 3).
+func TestTerraformValuesObjectNodeLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("resource \"helm_release\" \"db\" {\n  values = [yamlencode({\n")
+	for i := 0; i <= maxTerraformNodes; i++ {
+		b.WriteString("    key = \"value\"\n")
+	}
+	b.WriteString("  })]\n}\n")
+	got := Terraform("main.tf", []byte(b.String()))
+	terraformLimit(t, got, 0, 0)
+}
+
+// TestTerraformValuesListNodeLimit checks that every element of a values
+// list counts toward the node budget: a wide list is reported once, at the
+// file (the budget covers the whole file), and not scanned (spec section 3).
+func TestTerraformValuesListNodeLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("resource \"helm_release\" \"db\" {\n  values = [")
+	for i := 0; i <= maxTerraformNodes; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString("\"value\"")
+	}
+	b.WriteString("]\n}\n")
+	got := Terraform("main.tf", []byte(b.String()))
+	terraformLimit(t, got, 0, 0)
+}
+
+// TestTerraformEmbeddedAliasCycle checks that an alias cycle is not followed
+// twice: the anchor is scanned once and the scan ends (spec section 3).
+func TestTerraformEmbeddedAliasCycle(t *testing.T) {
+	source := "resource \"helm_release\" \"db\" {\n  values = [<<-EOT\n    a: &a\n      b: *a\n  EOT\n  ]\n}"
+	got := Terraform("main.tf", []byte(source))
+	if len(got.Findings) != 0 || len(got.Diagnostics) != 0 {
+		t.Fatalf("source docs/spec/v0.1.md section 3: %#v", got)
+	}
+}
+
+// TestTerraformEmbeddedAliasLimit checks that the alias expansion budget of
+// the YAML detector applies to an embedded values document: the expansions
+// are reported once, at the embedded values text, and stop (spec section 3).
+func TestTerraformEmbeddedAliasLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("resource \"helm_release\" \"db\" {\n  values = [<<-EOT\n")
+	b.WriteString("    a: &a [\"x\"]\n")
+	names := []string{"b", "c", "d", "e"}
+	for i, name := range names {
+		b.WriteString("    " + name + ": &" + name + " [")
+		for j := 0; j < 10; j++ {
+			if j > 0 {
+				b.WriteString(", ")
+			}
+			if i == 0 {
+				b.WriteString("*a")
+			} else {
+				b.WriteString("*" + names[i-1])
+			}
+		}
+		b.WriteString("]\n")
+	}
+	b.WriteString("  EOT\n  ]\n}")
+	got := Terraform("main.tf", []byte(b.String()))
+	// The embedded values text starts at the heredoc marker.
+	terraformLimit(t, got, 2, 13)
+	if got.Diagnostics[0].Message != "alias expansion limit reached" {
+		t.Fatalf("source docs/spec/v0.1.md section 3: got message %q, want the alias expansion limit", got.Diagnostics[0].Message)
 	}
 }
 

@@ -1,12 +1,18 @@
-LOCATION       RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
-main.tf:8:20   DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
-main.tf:17:19  DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
-main.tf:23:13  DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
-main.tf:64:20  DSD-IMG-002  high      unresolved  high     docker.io/bitnami/redis:{{…}}
-main.tf:12:31  DSD-CFG-001  high      confirmed   unknown  true
-main.tf:48:31  DSD-CFG-001  high      confirmed   unknown  true
-main.tf:2:16   DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
-main.tf:33:11  DSD-CHT-001  medium    confirmed   high     oci://registry-1.docker.io/bitnamicharts/redis
-main.tf:60:11  DSD-CHT-001  medium    unresolved  unknown  oci://registry-1.docker.io/bitnamicharts/{{…}}
-main.tf:53:20  DSD-IMG-004  low       inferred    high     mirror.example.com/bitnami/redis:7.2.0
-scanned 2 files, skipped 0, findings 10 (high 6, medium 3, low 1), diagnostics 2, unresolved 2, ignored 0
+LOCATION        RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
+main.tf:8:20    DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+main.tf:17:19   DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+main.tf:23:13   DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+main.tf:64:20   DSD-IMG-002  high      unresolved  high     docker.io/bitnami/redis:{{…}}
+main.tf:95:19   DSD-IMG-002  high      unresolved  high     docker.io/bitnami/redis:{{…}}
+main.tf:113:10  DSD-IMG-002  high      confirmed   high     docker.io/bitnami/redis:7
+main.tf:12:31   DSD-CFG-001  high      confirmed   unknown  true
+main.tf:48:31   DSD-CFG-001  high      confirmed   unknown  true
+main.tf:2:16    DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
+main.tf:33:11   DSD-CHT-001  medium    confirmed   high     oci://registry-1.docker.io/bitnamicharts/redis
+main.tf:74:19   DSD-IMG-003  medium    inferred    high     docker.io/bitnami/redis
+main.tf:84:19   DSD-IMG-003  medium    confirmed   high     docker.io/bitnami/redis
+main.tf:105:21  DSD-IMG-003  medium    inferred    high     docker.io/bitnami/redis
+main.tf:60:11   DSD-CHT-001  medium    unresolved  unknown  oci://registry-1.docker.io/bitnamicharts/{{…}}
+main.tf:75:19   DSD-CHT-001  medium    confirmed   unknown  https://charts.bitnami.com/bitnami
+main.tf:53:20   DSD-IMG-004  low       inferred    high     mirror.example.com/bitnami/redis:7.2.0
+scanned 2 files, skipped 0, findings 16 (high 8, medium 7, low 1), diagnostics 2, unresolved 2, ignored 0

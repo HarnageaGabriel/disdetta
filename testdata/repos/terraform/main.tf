@@ -66,3 +66,52 @@ resource "helm_release" "redis_dynamic" {
     }
   })]
 }
+
+resource "helm_release" "fallback" {
+  chart = "postgresql"
+
+  values = [yamlencode({
+    customImage = "bitnami/redis"
+    chartSource = "https://charts.bitnami.com/bitnami"
+  })]
+}
+
+resource "helm_release" "alias" {
+  chart = "postgresql"
+
+  values = [<<-EOT
+    base: &base
+      repository: bitnami/redis
+    image: *base
+  EOT
+  ]
+}
+
+resource "helm_release" "templated" {
+  chart = "postgresql"
+
+  values = [<<-EOT
+    image:
+      repository: "bitnami/redis"
+      tag: "{{ .Values.image.tag }}"
+  EOT
+  ]
+}
+
+resource "helm_release" "collection" {
+  chart = "postgresql"
+
+  values = [yamlencode({
+    customImages = ["bitnami/redis"]
+  })]
+}
+
+resource "helm_release" "scalar_alias" {
+  chart = "postgresql"
+
+  values = [<<-EOT
+    img: &img bitnami/redis:7
+    image: *img
+  EOT
+  ]
+}

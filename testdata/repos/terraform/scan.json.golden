@@ -8,8 +8,8 @@
     "filesScanned": 2,
     "filesSkipped": 0,
     "findings": {
-      "high": 6,
-      "medium": 3,
+      "high": 8,
+      "medium": 7,
       "low": 1
     },
     "diagnostics": 2,
@@ -85,6 +85,42 @@
       "fingerprint": "e5a620e9767ff887"
     },
     {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "unresolved",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 95,
+        "column": 19
+      },
+      "reference": "docker.io/bitnami/redis:{{…}}",
+      "original": "bitnami/redis:{{…}}",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "8738b6bc1f9fd33c"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 113,
+        "column": 10
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "baa806f55b286a6a"
+    },
+    {
       "ruleId": "DSD-CFG-001",
       "severity": "high",
       "confidence": "confirmed",
@@ -153,6 +189,54 @@
       "fingerprint": "89a3a6edcb2ebb23"
     },
     {
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "inferred",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 74,
+        "column": 19
+      },
+      "reference": "docker.io/bitnami/redis",
+      "original": "bitnami/redis",
+      "attributes": [],
+      "fingerprint": "eb237a3b5f4b3336"
+    },
+    {
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 84,
+        "column": 19
+      },
+      "reference": "docker.io/bitnami/redis",
+      "original": "bitnami/redis",
+      "attributes": [],
+      "fingerprint": "eb6d8c2ae7ee54c3"
+    },
+    {
+      "ruleId": "DSD-IMG-003",
+      "severity": "medium",
+      "confidence": "inferred",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 105,
+        "column": 21
+      },
+      "reference": "docker.io/bitnami/redis",
+      "original": "bitnami/redis",
+      "attributes": [],
+      "fingerprint": "7f48f11a5a19fcfd"
+    },
+    {
       "ruleId": "DSD-CHT-001",
       "severity": "medium",
       "confidence": "unresolved",
@@ -169,6 +253,24 @@
         "chart"
       ],
       "fingerprint": "0eda06f3ca92c720"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "main.tf",
+        "line": 75,
+        "column": 19
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "0bd72577193f540a"
     },
     {
       "ruleId": "DSD-IMG-004",
