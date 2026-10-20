@@ -15,6 +15,10 @@ git commit -s
 The `Signed-off-by` line certifies the contribution under the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/).
 
+## Governance
+
+Roles, decisions, and releases are described in [docs/governance.md](docs/governance.md).
+
 ## Development
 
 Install Go 1.26+, `golangci-lint`, and `govulncheck`, then run:
