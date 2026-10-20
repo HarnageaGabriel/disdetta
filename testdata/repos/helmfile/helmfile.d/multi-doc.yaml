@@ -1,0 +1,7 @@
+releases:
+  - name: docs
+    chart: bitnami/nginx
+---
+repositories:
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami

@@ -48,6 +48,9 @@ func Template(path string, data []byte) diag.Report {
 	if scanner.Err() != nil {
 		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, line+1, 1, "template line length limit reached"))
 	}
+	if isHelmfile(path) {
+		s.scanHelmfileTemplate(data)
+	}
 	return out
 }
 
