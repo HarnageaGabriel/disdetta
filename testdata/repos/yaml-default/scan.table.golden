@@ -1,0 +1,8 @@
+LOCATION                  RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
+deploy/anything.yml:5:15  DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+postgresql.yaml:5:15      DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+deploy/anything.yml:9:17  DSD-IMG-001  high      confirmed   low      docker.io/bitnamilegacy/os-shell
+postgresql.yaml:9:17      DSD-IMG-001  high      confirmed   low      docker.io/bitnamilegacy/os-shell
+deploy/anything.yml:3:26  DSD-CFG-001  high      confirmed   unknown  true
+postgresql.yaml:3:26      DSD-CFG-001  high      confirmed   unknown  true
+scanned 4 files, skipped 0, findings 6 (high 6, medium 0, low 0), diagnostics 0, unresolved 0, ignored 0

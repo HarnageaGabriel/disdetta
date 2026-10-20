@@ -59,6 +59,11 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 		s.walk(root, 0, 0, false)
 	case strings.Contains(base, "values"):
 		s.scanImages(root, false)
+	default:
+		// Every YAML file is a values file candidate (spec section 9): a
+		// document that matched no more specific case is scanned for image
+		// references, exactly like the values file case above.
+		s.scanImages(root, false)
 	}
 	// Shell commands are scanned only in the CI sources named by spec 9.2.
 	// Their script scalars are marked, so the whole-scalar fallback does not

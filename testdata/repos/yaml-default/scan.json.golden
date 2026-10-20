@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 4,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 6,
+      "medium": 0,
+      "low": 0
+    },
+    "diagnostics": 0,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "deploy/anything.yml",
+        "line": 5,
+        "column": 15
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "1559ec812ba8c67c"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "postgresql.yaml",
+        "line": 5,
+        "column": 15
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "8d3e86e9e30aacad"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "os-shell",
+      "location": {
+        "path": "deploy/anything.yml",
+        "line": 9,
+        "column": 17
+      },
+      "reference": "docker.io/bitnamilegacy/os-shell",
+      "original": "bitnamilegacy/os-shell",
+      "attributes": [],
+      "fingerprint": "bfcb003a044722ac"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "low",
+      "component": "os-shell",
+      "location": {
+        "path": "postgresql.yaml",
+        "line": 9,
+        "column": 17
+      },
+      "reference": "docker.io/bitnamilegacy/os-shell",
+      "original": "bitnamilegacy/os-shell",
+      "attributes": [],
+      "fingerprint": "119f484780cd96e3"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "deploy/anything.yml",
+        "line": 3,
+        "column": 26
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "84ece2f4dee4c089"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "postgresql.yaml",
+        "line": 3,
+        "column": 26
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "72ea56605b389a99"
+    }
+  ],
+  "diagnostics": []
+}
