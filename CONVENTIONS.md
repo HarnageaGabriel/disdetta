@@ -9,6 +9,7 @@ Mandatory for every contributor, human or AI agent.
 - Secrets never reach output, logs or reports; redact at the boundary (Helm values may hold passwords).
 - Read-only: no write calls to clusters or repositories, ever.
 - Tests: table-driven, `go-cmp`, goldens under `testdata/` updated with `-update`; every semantic case cites its `source`. Fuzz every parser.
+- Fuzzing: run every discovered target with `make fuzz FUZZTIME=30s`.
 - Catalog and mappings are data with a mandatory `source`. Unverified claims are marked `VERIFY:`.
 - New third-party modules need a written reason in the PR.
 - Never use `git stash`; use a temporary WIP commit.

@@ -1,7 +1,7 @@
 BINARY_EXT := $(if $(filter Windows_NT,$(OS)),.exe,)
 VERSION_PKG := github.com/HarnageaGabriel/disdetta/internal/version
 LDFLAGS := -s -w -X $(VERSION_PKG).Version=$${VERSION:-dev} -X $(VERSION_PKG).Commit=$${COMMIT:-unknown} -X $(VERSION_PKG).Date=$${DATE:-unknown}
-.PHONY: build test test-race lint vuln cover tidy fmt bench
+.PHONY: build test test-race lint vuln cover tidy fmt bench fuzz
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/disdetta$(BINARY_EXT) ./cmd/disdetta
 test:
@@ -21,3 +21,5 @@ fmt:
 	gofmt -w $$(find cmd internal -type f -name '*.go')
 bench:
 	go test -run '^$$' -bench=. -benchmem -count=3 ./internal/...
+fuzz:
+	sh scripts/fuzz.sh $${FUZZTIME:-30s}
