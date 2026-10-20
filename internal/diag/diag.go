@@ -6,6 +6,19 @@ import (
 	"strconv"
 )
 
+// The finding limits bound the work and the output of a scan of a hostile
+// repository (spec section 3). A limit is never a silent truncation: the
+// findings that are not kept are reported as a DSD-SCN-005 diagnostic.
+const (
+	// MaxFindingsPerFile is the largest number of findings one scanned file
+	// reports. The first findings are kept, in the order they were found.
+	MaxFindingsPerFile = 10000
+	// MaxFindingsPerRepository is the largest number of findings a
+	// repository scan reports. The first findings are kept, in the contract
+	// order.
+	MaxFindingsPerRepository = 100000
+)
+
 // Severity is a finding's policy severity.
 type Severity string
 
@@ -190,7 +203,7 @@ func DedupeFindings(in []Finding) []Finding {
 	seen := make(map[string]bool, len(in))
 	out := in[:0]
 	for _, f := range in {
-		key := f.RuleID + "\x00" + f.Location.Path + "\x00" + strconv.Itoa(f.Location.Line) + "\x00" + strconv.Itoa(f.Location.Column) + "\x00" + f.Reference + "\x00" + f.Original + "\x00" + string(f.Confidence)
+		key := dedupeKey(f)
 		if seen[key] {
 			continue
 		}
@@ -198,6 +211,24 @@ func DedupeFindings(in []Finding) []Finding {
 		out = append(out, f)
 	}
 	return out
+}
+
+// dedupeKey returns the key that identifies an exact repeat of a finding: the
+// same rule at the same position with the same reference and confidence.
+func dedupeKey(f Finding) string {
+	return f.RuleID + "\x00" + f.Location.Path + "\x00" + strconv.Itoa(f.Location.Line) + "\x00" + strconv.Itoa(f.Location.Column) + "\x00" + f.Reference + "\x00" + f.Original + "\x00" + string(f.Confidence)
+}
+
+// CapFindings keeps the first max findings of a report and reports whether
+// findings were dropped. The kept findings keep their order, so the result
+// never depends on map iteration order (spec section 3).
+func CapFindings(findings []Finding, max int) ([]Finding, bool) {
+	if len(findings) <= max {
+		return findings, false
+	}
+	kept := make([]Finding, max)
+	copy(kept, findings[:max])
+	return kept, true
 }
 
 // SeverityRank returns high before medium before low.
