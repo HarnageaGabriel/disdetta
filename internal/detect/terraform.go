@@ -5,6 +5,7 @@
 package detect
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"unicode/utf8"
@@ -26,7 +27,24 @@ const (
 	// terraformRedactedTemplate replaces a templated segment in a printed
 	// reference (spec section 6). The ellipsis is U+2026.
 	terraformRedactedTemplate = "{{…}}"
+	// maxTerraformParseDepth is the deepest nesting the HCL parser is
+	// allowed to reach. The parser recurses over the nesting, so a file
+	// nested deeper is never parsed: it is reported as DSD-SCN-005. The
+	// limit of the detector (maxTerraformDepth) is checked on the parsed
+	// tree; this bound only keeps the parser inside its stack.
+	maxTerraformParseDepth = 1024
 )
+
+// MaxTerraformHeredocLines is the largest number of lines the body of a
+// single heredoc may hold. The HCL parser costs more than linear time in
+// the lines of a heredoc body, so a bigger body is never parsed: the file
+// is reported as DSD-SCN-005 and not scanned (spec section 3).
+const MaxTerraformHeredocLines = 20000
+
+// MaxTerraformLines is the largest number of lines a Terraform file may
+// hold. A bigger file is never parsed: it is reported as DSD-SCN-005 and
+// not scanned (spec section 3).
+const MaxTerraformLines = 200000
 
 // terraformOCIPrefixes are the exact Bitnami OCI chart namespaces. A name
 // that only contains "bitnamicharts" (my-bitnamicharts-fork) is another
@@ -47,18 +65,34 @@ func Terraform(path string, data []byte) diag.Report {
 		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-001", diag.LevelError, path, 0, 0, "malformed Terraform HCL"))
 		return out
 	}
-	tokens, _ := hclsyntax.LexConfig(stripBOM(data), path, hcl.InitialPos)
-	if terraformLexDepthExceeded(tokens) {
+	body := stripBOM(data)
+	raw := terraformScanRaw(body)
+	if raw.lines > MaxTerraformLines || raw.heredoc > MaxTerraformHeredocLines {
+		// The file is not parsed: the HCL parser costs more than linear
+		// time in the lines of a heredoc body, and a big file is never
+		// parsed without a diagnostic (spec section 3).
+		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, 0, 0, "limit reached: Terraform heredoc or file too large"))
+		return out
+	}
+	if raw.depth > maxTerraformParseDepth {
+		// The parser recurses over the nesting of the expressions: a file
+		// nested deeper is never parsed (spec section 3).
 		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, 0, 0, errTerraformLimit.Error()))
 		return out
 	}
-	file, diags := hclsyntax.ParseConfig(stripBOM(data), path, hcl.InitialPos)
+	file, diags := hclsyntax.ParseConfig(body, path, hcl.InitialPos)
 	if file == nil || diags.HasErrors() {
 		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-001", diag.LevelError, path, 0, 0, "malformed Terraform HCL"))
 		return out
 	}
 	root, ok := file.Body.(*hclsyntax.Body)
 	if !ok {
+		return out
+	}
+	if terraformBodyDepth(root, 0) > maxTerraformDepth {
+		// The depth limit is read from the parsed tree: the file is
+		// reported and not scanned (spec section 3).
+		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, 0, 0, errTerraformLimit.Error()))
 		return out
 	}
 	s := terraformScan{path: path, out: &out, aliasSeen: map[*yaml.Node]bool{}}
@@ -783,22 +817,385 @@ func (s *terraformScan) unresolved(rng hcl.Range) {
 
 var errTerraformLimit = errors.New("Terraform depth or node limit reached")
 
-func terraformLexDepthExceeded(tokens hclsyntax.Tokens) bool {
-	depth := 0
-	for _, token := range tokens {
-		switch token.Type {
-		case hclsyntax.TokenOBrace, hclsyntax.TokenOBrack, hclsyntax.TokenOParen,
-			hclsyntax.TokenOHeredoc, hclsyntax.TokenTemplateInterp, hclsyntax.TokenTemplateControl:
-			depth++
-		case hclsyntax.TokenCBrace, hclsyntax.TokenCBrack, hclsyntax.TokenCParen,
-			hclsyntax.TokenCHeredoc, hclsyntax.TokenTemplateSeqEnd:
-			depth--
-		}
-		if depth > maxTerraformDepth {
-			return true
+// terraformBodyDepth returns the deepest nesting of the blocks and the
+// expressions of a body. The body itself counts as level 0, a block of the
+// body as level 1, and an expression of the body as the level of the body
+// plus the nesting of the expression.
+func terraformBodyDepth(body *hclsyntax.Body, depth int) int {
+	best := depth
+	for _, attr := range body.Attributes {
+		if d := depth + terraformExpressionDepth(attr.Expr); d > best {
+			best = d
 		}
 	}
-	return false
+	for _, block := range body.Blocks {
+		if d := terraformBlockDepth(block, depth+1); d > best {
+			best = d
+		}
+	}
+	return best
+}
+
+// terraformBlockDepth returns the deepest nesting of the attributes and the
+// blocks of a block. The block itself counts as the given level.
+func terraformBlockDepth(block *hclsyntax.Block, depth int) int {
+	best := depth
+	for _, attr := range block.Body.Attributes {
+		if d := depth + terraformExpressionDepth(attr.Expr); d > best {
+			best = d
+		}
+	}
+	for _, inner := range block.Body.Blocks {
+		if d := terraformBlockDepth(inner, depth+1); d > best {
+			best = d
+		}
+	}
+	return best
+}
+
+// terraformExpressionDepth returns the nesting depth of an expression: the
+// number of braces, brackets, parentheses, interpolations and heredocs it
+// opens. An expression held by another expression adds its depth to the
+// depth of the expression that holds it.
+func terraformExpressionDepth(expr hclsyntax.Expression) int {
+	if expr == nil {
+		return 0
+	}
+	switch value := expr.(type) {
+	case *hclsyntax.ObjectConsExpr:
+		depth := 0
+		for _, item := range value.Items {
+			if d := terraformExpressionDepth(item.KeyExpr); d > depth {
+				depth = d
+			}
+			if d := terraformExpressionDepth(item.ValueExpr); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.TupleConsExpr:
+		depth := 0
+		for _, item := range value.Exprs {
+			if d := terraformExpressionDepth(item); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.FunctionCallExpr:
+		depth := 0
+		for _, arg := range value.Args {
+			if d := terraformExpressionDepth(arg); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.ParenthesesExpr:
+		return 1 + terraformExpressionDepth(value.Expression)
+	case *hclsyntax.TemplateWrapExpr:
+		return 1 + terraformExpressionDepth(value.Wrapped)
+	case *hclsyntax.ConditionalExpr:
+		depth := 0
+		for _, item := range []hclsyntax.Expression{value.Condition, value.TrueResult, value.FalseResult} {
+			if d := terraformExpressionDepth(item); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.BinaryOpExpr:
+		depth := 0
+		for _, item := range []hclsyntax.Expression{value.LHS, value.RHS} {
+			if d := terraformExpressionDepth(item); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.UnaryOpExpr:
+		return 1 + terraformExpressionDepth(value.Val)
+	case *hclsyntax.IndexExpr:
+		depth := 0
+		for _, item := range []hclsyntax.Expression{value.Collection, value.Key} {
+			if d := terraformExpressionDepth(item); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.ForExpr:
+		depth := 0
+		for _, item := range []hclsyntax.Expression{value.CollExpr, value.KeyExpr, value.ValExpr, value.CondExpr} {
+			if d := terraformExpressionDepth(item); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.SplatExpr:
+		depth := 0
+		for _, item := range []hclsyntax.Expression{value.Source, value.Each} {
+			if d := terraformExpressionDepth(item); d > depth {
+				depth = d
+			}
+		}
+		return 1 + depth
+	case *hclsyntax.ObjectConsKeyExpr:
+		return terraformExpressionDepth(value.Wrapped)
+	case *hclsyntax.RelativeTraversalExpr:
+		return terraformExpressionDepth(value.Source)
+	case *hclsyntax.TemplateExpr:
+		return terraformTemplateDepth(value)
+	}
+	return 0
+}
+
+// terraformTemplateDepth returns the nesting depth of a template. A heredoc
+// opens one level, like its marker: the body of a heredoc starts on the
+// line after the marker, a quoted string on the line of the string.
+func terraformTemplateDepth(value *hclsyntax.TemplateExpr) int {
+	depth := 0
+	for _, part := range value.Parts {
+		if d := terraformExpressionDepth(part); d > depth {
+			depth = d
+		}
+	}
+	if len(value.Parts) > 0 && value.Parts[0].Range().Start.Line > value.Range().Start.Line {
+		depth++
+	}
+	return depth
+}
+
+// The modes of the raw scan of a Terraform file.
+const (
+	terraformModeCode = iota
+	terraformModeString
+	terraformModeComment
+	terraformModeHeredoc
+)
+
+// terraformRawScan is what the raw scan of a Terraform file counted.
+type terraformRawScan struct {
+	// lines is the number of lines of the file.
+	lines int
+	// heredoc is the number of lines of the largest heredoc body.
+	heredoc int
+	// depth is the deepest nesting of the expressions of the file.
+	depth int
+}
+
+// terraformFrame is one open bracket, string, comment or interpolation of
+// the raw scan. The closer is the character that ends the frame, and the
+// restore is the mode the scan returns to.
+type terraformFrame struct {
+	closer  byte
+	restore int
+	level   bool
+}
+
+// terraformRawScanner is the linear scan of the raw bytes of a Terraform
+// file. It counts the lines of the file, the lines of every heredoc body
+// and the deepest nesting of the expressions, without parsing the file.
+type terraformRawScanner struct {
+	lines    int
+	heredoc  int
+	body     int
+	depth    int
+	maxDepth int
+	mode     int
+	marker   []byte
+	stack    []terraformFrame
+}
+
+// terraformScanRaw reads the raw bytes of a Terraform file once, in linear
+// time, and counts the lines of the file, the lines of the largest heredoc
+// body and the deepest nesting of the expressions.
+//
+// The scan is line based and tolerant: a heredoc marker is a "<<" (with an
+// optional "-") followed by an identifier, and its body ends at the line
+// that holds the identifier alone. A marker that is never closed runs to
+// the end of the file. A quoted string, a comment and the body of a heredoc
+// hold no nesting, except for the interpolations they open.
+func terraformScanRaw(data []byte) terraformRawScan {
+	scanner := terraformRawScanner{}
+	for pos := 0; pos < len(data); {
+		end := pos
+		for end < len(data) && data[end] != '\n' {
+			end++
+		}
+		scanner.lines++
+		scanner.line(data[pos:end])
+		if end == len(data) {
+			break
+		}
+		pos = end + 1
+	}
+	return terraformRawScan{lines: scanner.lines, heredoc: scanner.heredoc, depth: scanner.maxDepth}
+}
+
+// line reads one line of the file.
+func (s *terraformRawScanner) line(text []byte) {
+	if s.mode == terraformModeHeredoc {
+		if s.closesHeredoc(text) {
+			// The body of the heredoc ends: the scan returns to the code
+			// that holds the marker.
+			s.mode = terraformModeCode
+			s.marker = nil
+			s.body = 0
+			return
+		}
+		s.body++
+		if s.body > s.heredoc {
+			s.heredoc = s.body
+		}
+	}
+	s.text(text)
+}
+
+// closesHeredoc reports whether a line closes the open heredoc: the marker
+// alone on the line, spaces around it allowed.
+func (s *terraformRawScanner) closesHeredoc(text []byte) bool {
+	return bytes.Equal(bytes.TrimSpace(text), s.marker)
+}
+
+// text reads the bytes of a line with the mode the scan is in.
+func (s *terraformRawScanner) text(text []byte) {
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		switch s.mode {
+		case terraformModeCode:
+			switch {
+			case c == '"':
+				s.push(terraformFrame{closer: '"', restore: terraformModeCode})
+				s.mode = terraformModeString
+			case c == '#':
+				// The rest of the line is a comment.
+				return
+			case c == '/' && i+1 < len(text) && text[i+1] == '/':
+				// The rest of the line is a comment.
+				return
+			case c == '/' && i+1 < len(text) && text[i+1] == '*':
+				s.push(terraformFrame{restore: terraformModeCode})
+				s.mode = terraformModeComment
+				i++
+			case c == '<' && i+1 < len(text) && text[i+1] == '<':
+				marker, ok := terraformHeredocMarker(text[i+2:])
+				if !ok {
+					i++
+					break
+				}
+				// The body of the heredoc starts on the next line.
+				s.marker = marker
+				s.mode = terraformModeHeredoc
+				return
+			case c == '{' || c == '[' || c == '(':
+				s.push(terraformFrame{closer: terraformCloser(c), restore: terraformModeCode, level: true})
+				s.open()
+			case c == '}' || c == ']' || c == ')':
+				s.close(terraformCloser(c))
+			}
+		case terraformModeString:
+			switch {
+			case c == '\\':
+				// The next byte is escaped.
+				i++
+			case c == '"':
+				s.pop()
+			case (c == '$' || c == '%') && i+1 < len(text) && text[i+1] == '{':
+				s.push(terraformFrame{closer: '}', restore: terraformModeString, level: true})
+				s.open()
+				s.mode = terraformModeCode
+				i++
+			}
+		case terraformModeComment:
+			if c == '*' && i+1 < len(text) && text[i+1] == '/' {
+				s.pop()
+				i++
+			}
+		case terraformModeHeredoc:
+			// The body of a heredoc holds no nesting, except for the
+			// interpolations it opens.
+			if (c == '$' || c == '%') && i+1 < len(text) && text[i+1] == '{' {
+				s.push(terraformFrame{closer: '}', restore: terraformModeHeredoc, level: true})
+				s.open()
+				s.mode = terraformModeCode
+				i++
+			}
+		}
+	}
+}
+
+// push opens a frame.
+func (s *terraformRawScanner) push(frame terraformFrame) {
+	s.stack = append(s.stack, frame)
+}
+
+// pop closes the open frame and returns to the mode it holds.
+func (s *terraformRawScanner) pop() {
+	if len(s.stack) == 0 {
+		return
+	}
+	frame := s.stack[len(s.stack)-1]
+	s.stack = s.stack[:len(s.stack)-1]
+	if frame.level {
+		s.depth--
+	}
+	s.mode = frame.restore
+}
+
+// close closes the open frame the given character closes. A frame that
+// another character closes is left open: a malformed file never counts as
+// a deeper nesting.
+func (s *terraformRawScanner) close(closer byte) {
+	if len(s.stack) == 0 {
+		return
+	}
+	if s.stack[len(s.stack)-1].closer != closer {
+		return
+	}
+	s.pop()
+}
+
+// open counts one more level of nesting.
+func (s *terraformRawScanner) open() {
+	s.depth++
+	if s.depth > s.maxDepth {
+		s.maxDepth = s.depth
+	}
+}
+
+// terraformCloser returns the character that closes the given bracket.
+func terraformCloser(bracket byte) byte {
+	switch bracket {
+	case '{':
+		return '}'
+	case '[':
+		return ']'
+	}
+	return ')'
+}
+
+// terraformHeredocMarker reads the heredoc marker that starts the given
+// text: an optional "-" and an identifier. It returns the identifier of
+// the marker. ok is false when the text does not start with a marker.
+func terraformHeredocMarker(text []byte) (marker []byte, ok bool) {
+	i := 0
+	if i < len(text) && text[i] == '-' {
+		i++
+	}
+	if i >= len(text) || !terraformIdentStart(text[i]) {
+		return nil, false
+	}
+	start := i
+	for i < len(text) && terraformIdentByte(text[i]) {
+		i++
+	}
+	return text[start:i], true
+}
+
+// terraformIdentStart reports whether a byte can start an identifier.
+func terraformIdentStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80
+}
+
+// terraformIdentByte reports whether a byte can be part of an identifier.
+func terraformIdentByte(c byte) bool {
+	return terraformIdentStart(c) || (c >= '0' && c <= '9') || c == '-'
 }
 
 func terraformString(attr *hclsyntax.Attribute) string {
