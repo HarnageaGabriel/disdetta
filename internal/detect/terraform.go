@@ -61,7 +61,7 @@ func Terraform(path string, data []byte) diag.Report {
 	if !ok {
 		return out
 	}
-	s := terraformScan{path: path, out: &out}
+	s := terraformScan{path: path, out: &out, aliasSeen: map[*yaml.Node]bool{}}
 	if err := s.body(root, 0); err != nil {
 		s.reportLimit(0, 0)
 	}
@@ -77,6 +77,12 @@ type terraformScan struct {
 	nodes int
 	// limitReported keeps DSD-SCN-005 to one diagnostic per file.
 	limitReported bool
+	// aliasSeen is the chain of alias targets being expanded, so a cycle is
+	// never followed twice (the cycle guard of the YAML detector).
+	aliasSeen map[*yaml.Node]bool
+	// aliasBudget counts the alias expansions of the file against the alias
+	// limit of the YAML detector.
+	aliasBudget int
 }
 
 // chargeNode charges one visited node against the budget. An exhausted
@@ -98,6 +104,26 @@ func (s *terraformScan) reportLimit(line, column int) {
 	}
 	s.limitReported = true
 	s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, s.path, line, column, errTerraformLimit.Error()))
+}
+
+// reportAliasLimit emits DSD-SCN-005 once per file for the alias expansion
+// budget of the YAML detector.
+func (s *terraformScan) reportAliasLimit(line, column int) {
+	if s.limitReported {
+		return
+	}
+	s.limitReported = true
+	s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, s.path, line, column, "alias expansion limit reached"))
+}
+
+// reportGuardLimit emits DSD-SCN-005 once per file for the depth and alias
+// expansion limits of the YAML detector, with the limit it reached.
+func (s *terraformScan) reportGuardLimit(line, column int, err error) {
+	if s.limitReported {
+		return
+	}
+	s.limitReported = true
+	s.out.Diagnostics = append(s.out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, s.path, line, column, err.Error()))
 }
 
 func (s *terraformScan) body(body *hclsyntax.Body, depth int) error {
@@ -195,24 +221,32 @@ func (s *terraformScan) values(expr hclsyntax.Expression, depth int) error {
 	switch value := expr.(type) {
 	case *hclsyntax.TupleConsExpr:
 		for _, item := range value.Exprs {
+			// Every element of the list is a visited node: a wide list
+			// never bypasses the node budget (spec section 3).
+			if !s.chargeNode() {
+				return errTerraformLimit
+			}
 			if err := s.values(item, depth+1); err != nil {
 				return err
 			}
 		}
 	case *hclsyntax.FunctionCallExpr:
 		if value.Name == "yamlencode" && len(value.Args) == 1 {
-			s.valuesObject(value.Args[0], nil, depth+1)
+			if err := s.valuesObject(value.Args[0], nil, depth+1); err != nil {
+				return err
+			}
 		}
 		// file(...) and every other call are intentionally ignored; the
 		// referenced file is scanned by the repository scanner separately.
 	default:
 		static, templated := terraformStaticString(expr)
 		before := len(s.out.Findings)
+		beforeDiagnostics := len(s.out.Diagnostics)
 		parsed, err := s.valuesYAML(static, expr, depth+1)
 		if err != nil {
 			return err
 		}
-		if parsed && (templated || terraformSafeReference(static) != strings.TrimSpace(static)) && len(s.out.Findings) == before {
+		if parsed && (templated || terraformSafeReference(static) != strings.TrimSpace(static)) && len(s.out.Findings) == before && len(s.out.Diagnostics) == beforeDiagnostics {
 			s.unresolved(expr.Range())
 		}
 	}
@@ -238,7 +272,9 @@ func (s *terraformScan) valuesYAML(text string, expr hclsyntax.Expression, depth
 	}
 	rootNode := root.Content[0]
 	if err := GuardYAML(rootNode); err != nil {
-		s.reportLimit(rng.Start.Line, rng.Start.Column)
+		// The depth and alias expansion limits of the YAML detector apply
+		// to an embedded values document (spec section 3).
+		s.reportGuardLimit(rng.Start.Line, rng.Start.Column, err)
 		return false, nil
 	}
 	if isSecretMapping(rootNode) {
@@ -247,7 +283,7 @@ func (s *terraformScan) valuesYAML(text string, expr hclsyntax.Expression, depth
 		return true, nil
 	}
 	line, column := s.valuesBase(expr)
-	s.valuesNode(rootNode, line, column, depth, findString(rootNode, []string{"global", "imageRegistry"}))
+	s.valuesNode(rootNode, "", line, column, depth, findString(rootNode, []string{"global", "imageRegistry"}))
 	return true, nil
 }
 
@@ -274,8 +310,11 @@ func (s *terraformScan) valuesBase(expr hclsyntax.Expression) (int, int) {
 
 // valuesNode walks an embedded values document. A mapping shaped like an
 // image triple is reported once, at its repository node, and the repository
-// scalar of that mapping is never reported again (spec section 9).
-func (s *terraformScan) valuesNode(node *yaml.Node, line, column, depth int, registry string) {
+// scalar of that mapping is never reported again (spec section 9). key is
+// the key of the node in its parent mapping: an alias is expanded with the
+// key of the node that refers to it, so the context of a reference is never
+// lost.
+func (s *terraformScan) valuesNode(node *yaml.Node, key string, line, column, depth int, registry string) {
 	if depth > maxTerraformDepth {
 		s.reportLimit(line, column)
 		return
@@ -300,63 +339,144 @@ func (s *terraformScan) valuesNode(node *yaml.Node, line, column, depth int, reg
 				// Already reported as part of the image triple.
 				continue
 			}
-			if value.Kind == yaml.ScalarNode && isImageKey(key.Value) {
-				s.imageYAML(value, line, column, registry)
-			}
 			if key.Value == "global" || key.Value == "security" || key.Value == "allowInsecureImages" {
 				s.configYAML(node, line, column, depth)
 			}
-			if value.Kind == yaml.ScalarNode {
-				s.valuesScalar(value, key.Value, line, column)
+			switch value.Kind {
+			case yaml.AliasNode:
+				// The alias is expanded with the key that refers to it:
+				// a reference under a known image key keeps its context.
+				s.valuesAlias(value, key.Value, line, column, depth, registry)
+			case yaml.ScalarNode:
+				// The scalar is scanned with its key: the whole-scalar
+				// fallback of the YAML detector needs it.
+				s.valuesScalar(value, key.Value, line, column, registry)
+			default:
+				s.valuesNode(value, key.Value, line, column, depth+1, registry)
 			}
-			s.valuesNode(value, line, column, depth+1, registry)
 		}
 	case yaml.SequenceNode:
 		for _, child := range node.Content {
-			s.valuesNode(child, line, column, depth+1, registry)
+			s.valuesNode(child, key, line, column, depth+1, registry)
 		}
 	case yaml.ScalarNode:
-		s.valuesScalar(node, "", line, column)
+		s.valuesScalar(node, key, line, column, registry)
+	case yaml.AliasNode:
+		s.valuesAlias(node, key, line, column, depth, registry)
 	}
 }
 
-func (s *terraformScan) valuesScalar(node *yaml.Node, key string, line, column int) {
+// valuesAlias follows an alias to the anchor it names, so the target is
+// scanned with the same limits as the YAML detector: a cycle is never
+// followed twice, and the alias expansion budget is reported once
+// (DSD-SCN-005, spec section 3). The target is scanned with the key of the
+// node that refers to it, so an alias under a known image key is resolved
+// like the value it names.
+func (s *terraformScan) valuesAlias(node *yaml.Node, key string, line, column, depth int, registry string) {
+	if node.Alias == nil || s.aliasSeen[node.Alias] {
+		return
+	}
+	if s.aliasBudget >= maxAliasNodes {
+		s.reportAliasLimit(line+node.Line-1, column+node.Column-1)
+		return
+	}
+	s.aliasBudget++
+	s.aliasSeen[node.Alias] = true
+	s.valuesNode(node.Alias, key, line, column, depth+1, registry)
+	delete(s.aliasSeen, node.Alias)
+}
+
+// valuesScalar scans one scalar of an embedded values document. The
+// whole-scalar fallback of the YAML detector applies: a Bitnami chart
+// repository URL inside any scalar, and an image reference under a key no
+// detector knows (spec section 9). A key the image detector resolves (an
+// image key) names an image reference: it is reported by the image
+// detector, never by the fallback. A scalar that carries a Helm template
+// segment is classified with the template-aware reference parser, so the
+// static part decides (spec section 2.2).
+func (s *terraformScan) valuesScalar(node *yaml.Node, key string, line, column int, registry string) {
 	rng := hcl.Range{Start: hcl.Pos{Line: line + node.Line - 1, Column: column + node.Column - 1}}
 	if url, ok := chartURLIn(node.Value); ok {
 		s.chartFinding(rng, "", url)
 	}
-	if knownImageKeys[key] || !isWholeImageScalar(node.Value) {
+	if isImageKey(key) {
+		// A known image key is resolved by the image detector: the value
+		// is an image reference, not a fallback (spec section 9).
+		s.imageYAML(node, line, column, registry)
+		return
+	}
+	if knownImageKeys[key] {
+		// A known image key is resolved by the image detector, and a
+		// component of a reported image triple is part of its reference
+		// (spec section 9).
+		return
+	}
+	if s.templateScalar(node.Value, rng) {
+		return
+	}
+	if !isWholeImageScalar(node.Value) {
 		return
 	}
 	s.addImageWithConfidence(node.Value, rng, true)
 }
 
+// templateScalar classifies a scalar that carries a Helm template segment.
+// A reference whose static part names a Bitnami namespace is a finding with
+// confidence unresolved; a reference without static Bitnami evidence stays a
+// DSD-SCN-003 diagnostic (spec section 2.2). It returns false for a scalar
+// that carries no template segment.
+func (s *terraformScan) templateScalar(value string, rng hcl.Range) bool {
+	if !strings.Contains(value, "{{") && !strings.Contains(value, "${") {
+		return false
+	}
+	ref := imageref.Parse(value)
+	if !ref.Templated {
+		return false
+	}
+	s.reportReference(ref, rng)
+	return true
+}
+
+// reportReference records one parsed reference at a position. A reference
+// with static Bitnami evidence is a finding, with confidence unresolved when
+// a part of it is templated; a reference without it is a DSD-SCN-003
+// diagnostic (spec section 2.2).
+func (s *terraformScan) reportReference(ref imageref.Reference, rng hcl.Range) {
+	classification, ok, unresolved := ClassifyReference(ref, false, false)
+	switch {
+	case unresolved:
+		s.unresolved(rng)
+	case ok:
+		s.addClassification(classification, rng)
+	}
+}
+
 // valuesObject walks the object literal of a yamlencode call. Every leaf is
 // scanned on its own: a dynamic leaf is unresolved (DSD-SCN-003) and never
 // cancels the finding of a literal sibling (spec section 2.2).
-func (s *terraformScan) valuesObject(expr hclsyntax.Expression, path []string, depth int) {
+func (s *terraformScan) valuesObject(expr hclsyntax.Expression, path []string, depth int) error {
 	obj, ok := expr.(*hclsyntax.ObjectConsExpr)
 	if !ok {
 		s.unresolved(expr.Range())
-		return
+		return nil
 	}
-	s.valuesObjectAt(obj, path, depth, terraformObjectRegistry(obj))
+	return s.valuesObjectAt(obj, path, depth, terraformObjectRegistry(obj))
 }
 
 // valuesObjectAt walks one object literal. registry is the global image
 // registry of the values, the fallback of an image triple without one.
-func (s *terraformScan) valuesObjectAt(obj *hclsyntax.ObjectConsExpr, path []string, depth int, registry string) {
+func (s *terraformScan) valuesObjectAt(obj *hclsyntax.ObjectConsExpr, path []string, depth int, registry string) error {
 	if depth > maxTerraformDepth {
 		s.reportLimit(0, 0)
-		return
+		return nil
 	}
 	if !s.chargeNode() {
-		return
+		return errTerraformLimit
 	}
 	if terraformObjectIsSecret(obj) {
 		// Nothing under a Secret is scanned or printed, at any depth
 		// (spec section 6).
-		return
+		return nil
 	}
 	triple, tripleExpr, isTriple := terraformObjectImageTriple(obj, registry)
 	reported := false
@@ -364,6 +484,11 @@ func (s *terraformScan) valuesObjectAt(obj *hclsyntax.ObjectConsExpr, path []str
 		reported = s.addImageReference(triple, tripleExpr.Range())
 	}
 	for _, item := range obj.Items {
+		// Every attribute of the object is a visited node: a wide object
+		// never bypasses the node budget (spec section 3).
+		if !s.chargeNode() {
+			return errTerraformLimit
+		}
 		key, literalKey := terraformStringResult(item.KeyExpr)
 		if !literalKey {
 			s.unresolved(item.KeyExpr.Range())
@@ -383,12 +508,55 @@ func (s *terraformScan) valuesObjectAt(obj *hclsyntax.ObjectConsExpr, path []str
 			}
 		}
 		childPath := append(append([]string(nil), path...), key)
-		if child, ok := item.ValueExpr.(*hclsyntax.ObjectConsExpr); ok {
-			s.valuesObjectAt(child, childPath, depth+1, registry)
+		switch child := item.ValueExpr.(type) {
+		case *hclsyntax.ObjectConsExpr:
+			if err := s.valuesObjectAt(child, childPath, depth+1, registry); err != nil {
+				return err
+			}
+			continue
+		case *hclsyntax.TupleConsExpr:
+			if err := s.valuesCollection(child, childPath, depth+1, registry); err != nil {
+				return err
+			}
 			continue
 		}
 		s.valuesLeaf(item.ValueExpr, childPath)
 	}
+	return nil
+}
+
+// valuesCollection walks a list of a yamlencode object. Every element is a
+// visited node, and every literal leaf is scanned with the rules of an
+// object leaf: a Bitnami chart repository URL inside any leaf is a chart
+// finding, and an image reference under a key no detector knows is a
+// finding with confidence inferred (spec section 9). A dynamic element is
+// unresolved (DSD-SCN-003) and never cancels the finding of a literal
+// sibling (spec section 2.2).
+func (s *terraformScan) valuesCollection(list *hclsyntax.TupleConsExpr, path []string, depth int, registry string) error {
+	if depth > maxTerraformDepth {
+		s.reportLimit(0, 0)
+		return errTerraformLimit
+	}
+	for _, item := range list.Exprs {
+		// Every element of the list is a visited node: a wide list never
+		// bypasses the node budget (spec section 3).
+		if !s.chargeNode() {
+			return errTerraformLimit
+		}
+		switch child := item.(type) {
+		case *hclsyntax.ObjectConsExpr:
+			if err := s.valuesObjectAt(child, path, depth+1, registry); err != nil {
+				return err
+			}
+		case *hclsyntax.TupleConsExpr:
+			if err := s.valuesCollection(child, path, depth+1, registry); err != nil {
+				return err
+			}
+		default:
+			s.valuesLeaf(item, path)
+		}
+	}
+	return nil
 }
 
 // valuesLeaf reports one leaf of a values object. A literal leaf is
@@ -414,11 +582,17 @@ func (s *terraformScan) valuesLeaf(expr hclsyntax.Expression, path []string) {
 	}
 }
 
-// valuesLiteral reports a literal leaf of a values object.
+// valuesLiteral reports a literal leaf of a values object. The whole-scalar
+// fallback of the YAML detector applies to a leaf as well: a Bitnami chart
+// repository URL inside any scalar, and an image reference under a key no
+// detector knows (spec section 9).
 func (s *terraformScan) valuesLiteral(text string, path []string, rng hcl.Range) {
 	key := ""
 	if len(path) > 0 {
 		key = path[len(path)-1]
+	}
+	if url, ok := chartURLIn(text); ok {
+		s.chartFinding(rng, "", url)
 	}
 	if (key == "image" || key == "repository") && isWholeImageScalar(text) {
 		s.addImage(text, rng)
@@ -426,7 +600,12 @@ func (s *terraformScan) valuesLiteral(text string, path []string, rng hcl.Range)
 	}
 	if pathEnds(path, "global", "security", "allowInsecureImages") && strings.EqualFold(text, "true") {
 		s.addConfig(rng)
+		return
 	}
+	if knownImageKeys[key] || !isWholeImageScalar(text) {
+		return
+	}
+	s.addImageWithConfidence(text, rng, true)
 }
 
 func (s *terraformScan) setBlock(block *hclsyntax.Block, depth int) {
@@ -519,13 +698,17 @@ func (s *terraformScan) addConfig(rng hcl.Range) {
 // imageYAML reports an image reference in an embedded values document. A
 // mapping is an image triple: its repository is joined with the sibling
 // registry, tag and digest, and the global registry is the fallback
-// (spec section 9).
+// (spec section 9). A component that carries a Helm template segment keeps
+// only its static part, so the finding is unresolved (spec section 2.2).
 func (s *terraformScan) imageYAML(node *yaml.Node, line, column int, registry string) {
 	switch node.Kind {
 	case yaml.ScalarNode:
+		rng := hcl.Range{Start: hcl.Pos{Line: line + node.Line - 1, Column: column + node.Column - 1}}
 		if isWholeImageScalar(node.Value) {
-			s.addImage(node.Value, hcl.Range{Start: hcl.Pos{Line: line + node.Line - 1, Column: column + node.Column - 1}})
+			s.addImage(node.Value, rng)
+			return
 		}
+		s.templateScalar(node.Value, rng)
 	case yaml.MappingNode:
 		repo := valueAt(node, "repository")
 		if repo == "" {
@@ -539,14 +722,11 @@ func (s *terraformScan) imageYAML(node *yaml.Node, line, column int, registry st
 		if digest := valueAt(node, "digest"); digest != "" {
 			ref = imageref.Parse(ref.Original + "@" + digest)
 		}
-		if !ref.HasStaticEvidence {
-			return
-		}
 		position := nodeAt(node, "repository")
 		if position == nil {
 			position = node
 		}
-		s.addImage(ref.Original, hcl.Range{Start: hcl.Pos{Line: line + position.Line - 1, Column: column + position.Column - 1}})
+		s.reportReference(ref, hcl.Range{Start: hcl.Pos{Line: line + position.Line - 1, Column: column + position.Column - 1}})
 	}
 }
 
@@ -923,21 +1103,44 @@ func terraformOCIChartComponent(value string) string {
 	return component
 }
 
+// dedupeTerraformFindings drops the repeated findings of one reference. An
+// anchor and the aliases that refer to it are one logical reference, so the
+// finding with the strongest confidence is kept: a known image key is
+// stronger evidence than the unknown-key fallback of the anchor (spec
+// section 5).
 func dedupeTerraformFindings(in []diag.Finding) []diag.Finding {
 	if len(in) < 2 {
 		return in
 	}
-	seen := make(map[string]bool, len(in))
+	seen := make(map[string]int, len(in))
 	out := in[:0]
 	for _, finding := range in {
 		key := fallbackKey(finding)
-		if seen[key] {
+		index, ok := seen[key]
+		if !ok {
+			seen[key] = len(out)
+			out = append(out, finding)
 			continue
 		}
-		seen[key] = true
-		out = append(out, finding)
+		if terraformConfidenceRank(finding.Confidence) < terraformConfidenceRank(out[index].Confidence) {
+			out[index] = finding
+		}
 	}
 	return out
+}
+
+// terraformConfidenceRank orders the confidences from the strongest to the
+// weakest: confirmed beats inferred beats unresolved.
+func terraformConfidenceRank(confidence diag.Confidence) int {
+	switch confidence {
+	case diag.ConfidenceConfirmed:
+		return 0
+	case diag.ConfidenceInferred:
+		return 1
+	case diag.ConfidenceUnresolved:
+		return 2
+	}
+	return 3
 }
 
 func terraformSafeReference(value string) string {
