@@ -14,7 +14,7 @@ import (
 var update = flag.Bool("update", false, "update golden files")
 
 func TestGoldenReports(t *testing.T) {
-	for _, name := range []string{"helm", "flux", "argocd", "kustomize", "compose", "gitlab", "azure", "actions", "dockerfile", "nested-values", "helm-template", "chart-vendored", "corpus-fallback"} {
+	for _, name := range []string{"helm", "flux", "argocd", "kustomize", "compose", "gitlab", "azure", "actions", "dockerfile", "nested-values", "helm-template", "chart-vendored", "corpus-fallback", "terraform"} {
 		t.Run(name, func(t *testing.T) {
 			root := filepath.Join("..", "..", "..", "testdata", "repos", name)
 			got, err := repo.Scan(context.Background(), root)

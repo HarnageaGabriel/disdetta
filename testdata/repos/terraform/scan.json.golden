@@ -1,0 +1,214 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 2,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 6,
+      "medium": 3,
+      "low": 1
+    },
+    "diagnostics": 2,
+    "unresolved": 2,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "main.tf",
+        "line": 8,
+        "column": 20
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "c9768cb60399fca0"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "main.tf",
+        "line": 17,
+        "column": 19
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "4b63f2dae631b51b"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "main.tf",
+        "line": 23,
+        "column": 13
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "7dd2166fd82a82f9"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "unresolved",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 64,
+        "column": 20
+      },
+      "reference": "docker.io/bitnami/redis:{{…}}",
+      "original": "bitnami/redis:{{…}}",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "e5a620e9767ff887"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "main.tf",
+        "line": 12,
+        "column": 31
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "3e0c07d36382cf42"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "main.tf",
+        "line": 48,
+        "column": 31
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "a92f888606cfa77e"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "main.tf",
+        "line": 2,
+        "column": 16
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "a507a7934ce78c56"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 33,
+        "column": 11
+      },
+      "reference": "oci://registry-1.docker.io/bitnamicharts/redis",
+      "original": "oci://registry-1.docker.io/bitnamicharts/redis",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "89a3a6edcb2ebb23"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "unresolved",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "main.tf",
+        "line": 60,
+        "column": 11
+      },
+      "reference": "oci://registry-1.docker.io/bitnamicharts/{{…}}",
+      "original": "oci://registry-1.docker.io/bitnamicharts/{{…}}",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "0eda06f3ca92c720"
+    },
+    {
+      "ruleId": "DSD-IMG-004",
+      "severity": "low",
+      "confidence": "inferred",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "main.tf",
+        "line": 53,
+        "column": 20
+      },
+      "reference": "mirror.example.com/bitnami/redis:7.2.0",
+      "original": "mirror.example.com/bitnami/redis:7.2.0",
+      "attributes": [
+        "mirror"
+      ],
+      "fingerprint": "57f02c431c1318a5"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "DSD-SCN-003",
+      "level": "info",
+      "message": "unresolved reference without Bitnami evidence",
+      "location": {
+        "path": "main.tf",
+        "line": 37,
+        "column": 16
+      }
+    },
+    {
+      "code": "DSD-SCN-003",
+      "level": "info",
+      "message": "unresolved reference without Bitnami evidence",
+      "location": {
+        "path": "main.tf",
+        "line": 39,
+        "column": 13
+      }
+    }
+  ]
+}

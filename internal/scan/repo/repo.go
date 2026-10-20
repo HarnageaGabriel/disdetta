@@ -128,7 +128,8 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 	yamlFile := strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 	dockerfile := lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile")
 	templateText := strings.HasSuffix(lower, ".tpl") || (yamlFile && underChartTemplates(path))
-	if !yamlFile && !dockerfile && !templateText {
+	terraformFile := strings.HasSuffix(lower, ".tf")
+	if !yamlFile && !dockerfile && !templateText && !terraformFile {
 		return out
 	}
 	data, err := readRegularFile(path, info)
@@ -147,6 +148,11 @@ func scanFile(path, display string, info fs.FileInfo) (out diag.Report) {
 		return out
 	}
 	out.Summary.FilesScanned = 1
+	if terraformFile {
+		detected := detect.Terraform(display, data)
+		detected.Summary.FilesScanned = 1
+		return detected
+	}
 	if dockerfile {
 		detected := detect.Dockerfile(display, data)
 		detected.Summary.FilesScanned = 1
