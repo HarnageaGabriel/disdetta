@@ -46,7 +46,7 @@ func YAML(path string, data []byte) diag.Report {
 		if strings.EqualFold(findString(root, []string{"kind"}), "Secret") {
 			continue
 		}
-		s := walkState{path: path, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out}
+		s := walkState{path: path, data: data, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out}
 		s.scanDocument(root)
 	}
 	return out
@@ -59,7 +59,11 @@ type walkState struct {
 	depthReported      bool
 	aliasLimitReported bool
 	templateComment    bool
-	out                *diag.Report
+	shellScriptNodes   map[*yaml.Node]bool
+	// data is the raw file content, used to resolve the column of a YAML
+	// block scalar's content (spec 9.2).
+	data []byte
+	out  *diag.Report
 }
 
 func (s *walkState) walk(n *yaml.Node, lineOffset, depth int, embedded bool) {
@@ -281,7 +285,9 @@ func Dockerfile(path string, data []byte) diag.Report {
 	args, stages := map[string]string{}, map[string]bool{}
 	seenFrom := false
 	logical := ""
+	rawLogical := ""
 	var heredocs []heredoc
+	var shellRuns []shellScriptValue
 	for scanner.Scan() {
 		line++
 		if len(heredocs) > 0 {
@@ -295,6 +301,9 @@ func Dockerfile(path string, data []byte) diag.Report {
 		part := strings.TrimSpace(scanner.Text())
 		if logical == "" {
 			start = line
+			rawLogical = scanner.Text()
+		} else {
+			rawLogical += "\n" + scanner.Text()
 		}
 		continued := strings.HasSuffix(part, "\\")
 		part = strings.TrimSpace(strings.TrimSuffix(part, "\\"))
@@ -308,6 +317,14 @@ func Dockerfile(path string, data []byte) diag.Report {
 		f := strings.Fields(instruction)
 		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
 			continue
+		}
+		if len(heredocs) == 0 && strings.EqualFold(f[0], "RUN") {
+			raw := strings.TrimLeft(rawLogical, " \t")
+			prefix := len(rawLogical) - len(raw)
+			if len(raw) >= len(f[0]) {
+				content, removed := stripDockerRunFlags(raw[len(f[0]):])
+				shellRuns = append(shellRuns, shellScriptValue{value: content, origin: shellOrigin{line: start, column: prefix + len(f[0]) + 1 + removed}})
+			}
 		}
 		if strings.EqualFold(f[0], "ARG") && len(f) >= 2 && !seenFrom {
 			name, value, ok := strings.Cut(f[1], "=")
@@ -347,7 +364,64 @@ func Dockerfile(path string, data []byte) diag.Report {
 	if scanner.Err() != nil {
 		out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, line+1, 1, "Dockerfile line length limit reached"))
 	}
+	s.scanShellValues(shellRuns)
 	return out
+}
+
+// stripDockerRunFlags removes the BuildKit flags that may lead a RUN
+// instruction (--mount, --network, --security) and returns the remaining
+// command with the number of characters removed, so the first token of the
+// command keeps its column in the file.
+func stripDockerRunFlags(content string) (string, int) {
+	rest := content
+	removed := 0
+	flags := 0
+	for {
+		trimmed := strings.TrimLeft(rest, " \t")
+		skip := len(rest) - len(trimmed)
+		if !strings.HasPrefix(trimmed, "--") {
+			if flags > 0 {
+				removed += skip
+				rest = trimmed
+			}
+			break
+		}
+		end := strings.IndexAny(trimmed, " \t")
+		token := trimmed
+		if end >= 0 {
+			token = trimmed[:end]
+		}
+		name, _, hasValue := strings.Cut(token, "=")
+		if name != "--mount" && name != "--network" && name != "--security" {
+			break
+		}
+		removed += skip
+		rest = trimmed
+		flags++
+		if end < 0 {
+			removed += len(trimmed)
+			rest = ""
+			break
+		}
+		removed += end + 1
+		rest = trimmed[end+1:]
+		if hasValue {
+			continue
+		}
+		// The flag takes its value as the next token.
+		valueEnd := strings.IndexAny(rest, " \t")
+		if valueEnd < 0 {
+			removed += len(rest)
+			rest = ""
+			break
+		}
+		removed += valueEnd
+		rest = rest[valueEnd:]
+	}
+	if flags == 0 {
+		return content, 0
+	}
+	return rest, removed
 }
 
 // expandDockerArgs substitutes ${NAME} and $NAME variable tokens from the ARG
@@ -543,6 +617,9 @@ func (s *walkState) scanFallbackAt(n *yaml.Node, key string, depth int) {
 }
 
 func (s *walkState) scanFallbackScalar(n *yaml.Node, key string) {
+	if s.shellScriptNodes[n] {
+		return
+	}
 	if url, ok := chartURLIn(n.Value); ok {
 		s.out.Findings = append(s.out.Findings, diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, n.Line, n.Column), Reference: url, Original: url, Attributes: []string{"chart"}})
 	}
