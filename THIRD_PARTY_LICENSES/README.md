@@ -15,7 +15,7 @@ are not reproduced here. This directory complements the
 | Module | Version | SPDX license | File |
 | --- | --- | --- | --- |
 | github.com/hashicorp/hcl/v2 | v2.25.0 | MPL-2.0 | [github.com-hashicorp-hcl-v2-MPL-2.0.txt](github.com-hashicorp-hcl-v2-MPL-2.0.txt) |
-| github.com/santhosh-tekuri/jsonschema/v6 | v6.0.2 | Apache-2.0 | [github.com-santhosh-tekuri-jsonschema-v6-Apache-2.0.txt](github.com-santhosh-tekuri-jsonschema-v6-Apache-2.0.txt) |
+| github.com/santhosh-tekuri/jsonschema/v6 | v6.0.3 | Apache-2.0 | [github.com-santhosh-tekuri-jsonschema-v6-Apache-2.0.txt](github.com-santhosh-tekuri-jsonschema-v6-Apache-2.0.txt) |
 | github.com/spf13/cobra | v1.10.2 | Apache-2.0 | [github.com-spf13-cobra-Apache-2.0.txt](github.com-spf13-cobra-Apache-2.0.txt) |
 | github.com/zclconf/go-cty | v1.19.0 | MIT | [github.com-zclconf-go-cty-MIT.txt](github.com-zclconf-go-cty-MIT.txt) |
 | gopkg.in/yaml.v3 | v3.0.1 | MIT OR Apache-2.0 | [gopkg.in-yaml.v3-MIT-OR-Apache-2.0.txt](gopkg.in-yaml.v3-MIT-OR-Apache-2.0.txt) |
