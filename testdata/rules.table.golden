@@ -1,0 +1,18 @@
+CODE         KIND        SEVERITY  LEVEL    TITLE                                             DOCS
+DSD-CFG-001  rule        high      -        allowInsecureImages is enabled                    https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CFG-001.md
+DSD-CHT-001  rule        medium    -        Bitnami chart source                              https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CHT-001.md
+DSD-CHT-002  rule        medium    -        Vendored Bitnami chart                            https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-CHT-002.md
+DSD-IMG-001  rule        high      -        Bitnami legacy image                              https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-001.md
+DSD-IMG-002  rule        high      -        Versioned Bitnami image                           https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-002.md
+DSD-IMG-003  rule        medium    -        Community Bitnami image                           https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-003.md
+DSD-IMG-004  rule        low       -        Bitnami image from another registry               https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-IMG-004.md
+DSD-SCN-001  diagnostic  -         error    Malformed file                                    https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-001.md
+DSD-SCN-002  diagnostic  -         warning  File skipped                                      https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-002.md
+DSD-SCN-003  diagnostic  -         info     Unresolved reference                              https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-003.md
+DSD-SCN-004  diagnostic  -         error    Read error                                        https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-004.md
+DSD-SCN-005  diagnostic  -         warning  Limit reached                                     https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-005.md
+DSD-SCN-006  diagnostic  -         warning  Ignore entry expired                              https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-006.md
+DSD-SCN-007  diagnostic  -         info     Template text scanned line by line                https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-007.md
+DSD-SCN-008  diagnostic  -         error    File larger than the size limit                   https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-008.md
+DSD-SCN-009  diagnostic  -         error    Helm release payload over a cap or not decodable  https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-009.md
+DSD-SCN-010  diagnostic  -         warning  Cluster list failed                               https://github.com/HarnageaGabriel/disdetta/blob/main/docs/diagnostics/DSD-SCN-010.md

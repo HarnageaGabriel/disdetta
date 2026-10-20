@@ -1,6 +1,9 @@
 package detect
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -34,13 +37,15 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 				s.out.Findings[i].Impact = catalog.Impact(chart)
 			}
 		}
+	case kind == "helmchartinflationgenerator":
+		s.scanHelmChartGenerator(root)
 	case kind == "application":
 		s.scanArgo(nodeAt(root, "spec"))
 	case kind == "applicationset":
 		s.scanArgo(nodeAt(root, "spec", "template", "spec"))
 	case isKubernetesKind(kind):
 		s.scanPodSpecs(root, kind)
-	case base == "kustomization.yaml" || base == "kustomization.yml":
+	case isKustomizationBase(base):
 		s.scanKustomize(root)
 	case isCompose(base):
 		s.scanCompose(root)
@@ -55,6 +60,11 @@ func (s *walkState) scanDocument(root *yaml.Node) {
 	case strings.Contains(base, "values"):
 		s.scanImages(root, false)
 	}
+	// Shell commands are scanned only in the CI sources named by spec 9.2.
+	// Their script scalars are marked, so the whole-scalar fallback does not
+	// report prose or echo arguments that the shell tokenizer must ignore.
+	// Any other scalar of the same file still falls back (spec section 9).
+	s.scanShellScripts(root)
 	// Whole-scalar fallback (spec section 9): unknown-key image scalars and
 	// Bitnami chart repository URLs inside any scalar, in any file. A scalar a
 	// specific detector already reported is not reported again.
@@ -238,7 +248,144 @@ func (s *walkState) scanKustomize(root *yaml.Node) {
 			s.addImage(name, n.Line, n.Column, false)
 		}
 	}
+	for _, chart := range sequenceAt(root, "helmCharts") {
+		s.addChartAt(nodeAt(chart, "repo"), valueAt(chart, "name"))
+		s.scanImages(nodeAt(chart, "valuesInline"), true)
+	}
 }
+
+func (s *walkState) scanHelmChartGenerator(root *yaml.Node) {
+	s.addChartAt(nodeAt(root, "repo"), valueAt(root, "name"))
+	s.scanImages(nodeAt(root, "valuesInline"), true)
+}
+
+// isKustomizationBase reports whether a (lower-cased) file name selects the
+// Kustomize scanner: the file names kustomize accepts, including the
+// extensionless `Kustomization` (spec section 9.2).
+func isKustomizationBase(base string) bool {
+	return base == "kustomization" || base == "kustomization.yaml" || base == "kustomization.yml"
+}
+
+// IsKustomizationFile reports whether path names a Kustomization file: the
+// file names kustomize accepts, `kustomization.yaml`, `kustomization.yml` and
+// the extensionless `Kustomization`, matched case-insensitively (spec section
+// 9.2).
+func IsKustomizationFile(path string) bool {
+	return isKustomizationBase(strings.ToLower(filepath.Base(path)))
+}
+
+// ValuesRefs holds the valuesFile references the YAML documents of a file
+// declare (spec section 9.2).
+type ValuesRefs struct {
+	// Generator lists the valuesFile of every HelmChartInflationGenerator.
+	Generator []string
+	// Chart lists the valuesFile of every helmCharts entry.
+	Chart []string
+}
+
+// All returns every declared reference, the helmCharts entries first.
+func (v ValuesRefs) All() []string {
+	out := make([]string, 0, len(v.Chart)+len(v.Generator))
+	out = append(out, v.Chart...)
+	out = append(out, v.Generator...)
+	return out
+}
+
+// ValuesFileRefs returns the valuesFile references the YAML documents in data
+// declare, in document order: the top-level valuesFile of every
+// HelmChartInflationGenerator, and the valuesFile of every helmCharts entry of
+// a Kustomization document. A file that declares none is not parsed at all.
+// The repository scanner resolves the references relative to the directory of
+// the file that declares them (spec section 9.2).
+func ValuesFileRefs(path string, data []byte) ValuesRefs {
+	var out ValuesRefs
+	if !containsFold(data, "valuesfile") {
+		return out
+	}
+	kustomize := IsKustomizationFile(path)
+	dec := yaml.NewDecoder(bytes.NewReader(stripBOM(data)))
+	for {
+		var doc yaml.Node
+		err := dec.Decode(&doc)
+		if err != nil {
+			break
+		}
+		if len(doc.Content) == 0 {
+			continue
+		}
+		root := doc.Content[0]
+		if strings.EqualFold(valueAt(root, "kind"), "HelmChartInflationGenerator") {
+			if ref := strings.TrimSpace(valueAt(root, "valuesFile")); ref != "" {
+				out.Generator = append(out.Generator, ref)
+			}
+		}
+		if kustomize {
+			for _, chart := range sequenceAt(root, "helmCharts") {
+				if ref := strings.TrimSpace(valueAt(chart, "valuesFile")); ref != "" {
+					out.Chart = append(out.Chart, ref)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// containsFold reports whether data holds s, ignoring ASCII case. It never
+// allocates, so a repository scan can look for a key in every file it reads.
+func containsFold(data []byte, s string) bool {
+	needle := []byte(s)
+	if len(needle) == 0 {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(data); i++ {
+		if bytes.EqualFold(data[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// HelmValues scans one file as chart values, without filename-based
+// dispatching, so a valuesFile the repository scanner resolved for a chart is
+// scanned as chart values whatever its name (spec section 9.2). The coverage
+// is the one of a values file: the whole tree is scanned for image references
+// and the whole-scalar fallback applies.
+func HelmValues(path string, data []byte) diag.Report {
+	data = stripBOM(data)
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var out diag.Report
+	for {
+		var doc yaml.Node
+		err := dec.Decode(&doc)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-001", diag.LevelError, path, 0, 0, "malformed YAML"))
+			break
+		}
+		if len(doc.Content) == 0 {
+			continue
+		}
+		root := doc.Content[0]
+		if err := GuardYAML(root); err != nil {
+			out.Diagnostics = append(out.Diagnostics, newDiagnostic("DSD-SCN-005", diag.LevelWarning, path, root.Line, root.Column, err.Error()))
+			continue
+		}
+		if strings.EqualFold(valueAt(root, "kind"), "Secret") {
+			continue
+		}
+		s := walkState{path: path, globalRegistry: findString(root, []string{"global", "imageRegistry"}), out: &out}
+		s.scanConfig(root)
+		s.scanImages(root, false)
+		before := len(s.out.Findings)
+		s.scanFallbacks(root)
+		s.dropDuplicateFallbacks(before)
+		s.out.Findings = diag.DedupeFindings(s.out.Findings)
+	}
+	return out
+}
+
 func (s *walkState) scanCompose(root *yaml.Node) {
 	for _, service := range mapValues(nodeAt(root, "services")) {
 		s.addNodeImage(nodeAt(service, "image"), false)

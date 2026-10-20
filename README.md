@@ -17,6 +17,9 @@ in Kubernetes clusters and GitOps repositories. Read-only and reviewable by desi
       alt="Go version"></a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/HarnageaGabriel/disdetta">
+    <img src="https://api.scorecard.dev/projects/github.com/HarnageaGabriel/disdetta/badge"
+      alt="OpenSSF Scorecard"></a>
   <img src="https://img.shields.io/badge/status-pre--alpha-orange.svg" alt="Status: pre-alpha">
 </p>
 
@@ -45,6 +48,8 @@ never changes anything.
 ```sh
 go install github.com/HarnageaGabriel/disdetta/cmd/disdetta@latest
 disdetta scan .
+disdetta rules
+disdetta scan . --format sarif
 ```
 
 Every Bitnami reference, with file, line and column, most urgent first:
@@ -61,7 +66,7 @@ scanned 3 files, skipped 0, findings 5 (high 3, medium 2, low 0), diagnostics 0,
 
 Exit status 0 means no findings, 1 means findings (tune with `--fail-on`), 2
 means a usage or fatal error, 3 means the scan was incomplete. Rules and codes:
-[docs/diagnostics](docs/diagnostics/README.md); contract: [docs/spec/v0.1.md](docs/spec/v0.1.md). `--format json` gives a stable, versioned document for CI.
+[docs/diagnostics](docs/diagnostics/README.md); contract: [docs/spec/v0.1.md](docs/spec/v0.1.md). `--format json` gives a stable, versioned document for CI; `--format sarif` gives code-scanning output.
 
 ## Why
 
@@ -111,7 +116,7 @@ exists today.
 | `scan --cluster` (workloads, Helm releases, opt-in release Secrets) | Implemented, tested on kind |
 | Catalog of exit routes (data, each entry with a source) | PostgreSQL -> CloudNativePG (`partial`) |
 | `plan` ([docs](docs/usage/plan.md)) | PostgreSQL; Redis, Kafka, MongoDB, Keycloak need research (issues #3-#6) |
-| SARIF output, GoReleaser, Homebrew, krew | Planned |
+| SARIF output, `rules`, GoReleaser, Homebrew, krew | SARIF and `rules` implemented; releases planned |
 
 ## How it works
 
@@ -186,3 +191,4 @@ No. It produces a checklist. The dump and restore stay under your control.
 ## License
 
 [Apache-2.0](LICENSE). disdetta is not affiliated with Bitnami or Broadcom.
+Third-party licenses: [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/README.md). Trademarks: [TRADEMARKS.md](TRADEMARKS.md).

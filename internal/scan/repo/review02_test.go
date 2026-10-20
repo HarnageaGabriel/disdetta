@@ -53,7 +53,7 @@ func TestComposeFingerprintsAreDeterministic(t *testing.T) {
 // Every checked-in fixture renders byte-identical JSON across 20 in-process
 // scans (spec section 10 acceptance).
 func TestFixtureReportsAreDeterministic(t *testing.T) {
-	for _, name := range []string{"helm", "flux", "argocd", "kustomize", "compose", "gitlab", "azure", "actions", "dockerfile", "nested-values", "helm-template", "chart-vendored", "corpus-fallback"} {
+	for _, name := range []string{"helm", "flux", "argocd", "kustomize", "compose", "gitlab", "azure", "actions", "dockerfile", "nested-values", "helm-template", "chart-vendored", "corpus-fallback", "shellcmds"} {
 		t.Run(name, func(t *testing.T) {
 			root := filepath.Join("..", "..", "..", "testdata", "repos", name)
 			first := ""
