@@ -1,28 +1,27 @@
 # Shape source: SKorolchuk/dpio-platform
 # local-baremetal/core/azure-pipelines.yml:24,72.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
-# padding preserves the corpus helm repository command line.
+# The padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
+# padding preserves the corpus command lines.
 steps:
-  - script: >-
-      true && helm repo add bitnami https://charts.bitnami.com/bitnami
-extra:
+- script: >-
+    set -e
+    set -x
+    set -x
+    true && helm repo add bitnami https://charts.bitnami.com/bitnami
 # padding preserves the corpus helm upgrade command line.
 # padding preserves the corpus helm upgrade command line.
 # padding preserves the corpus helm upgrade command line.
@@ -69,4 +68,5 @@ extra:
 # padding preserves the corpus helm upgrade command line.
 # padding preserves the corpus helm upgrade command line.
 # padding preserves the corpus helm upgrade command line.
-  script: helm upgrade metrics-server-1617042143 bitnami/metrics-server
+# padding preserves the corpus helm upgrade command line.
+- script: helm upgrade metrics-server-1617042143 bitnami/metrics-server

@@ -1,5 +1,5 @@
 LOCATION                   RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
 .gitlab-ci.yml:120:78      DSD-IMG-002  high      inferred    low      docker.io/bitnami/kubectl:1.17.4
 azure-pipelines.yml:72:50  DSD-CHT-001  medium    inferred    medium   bitnami/metrics-server
-azure-pipelines.yml:24:37  DSD-CHT-001  medium    inferred    unknown  https://charts.bitnami.com/bitnami
+azure-pipelines.yml:24:35  DSD-CHT-001  medium    inferred    unknown  https://charts.bitnami.com/bitnami
 scanned 2 files, skipped 0, findings 3 (high 1, medium 2, low 0), diagnostics 0, unresolved 0, ignored 0

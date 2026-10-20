@@ -63,7 +63,7 @@
       "location": {
         "path": "azure-pipelines.yml",
         "line": 24,
-        "column": 37
+        "column": 35
       },
       "reference": "https://charts.bitnami.com/bitnami",
       "original": "https://charts.bitnami.com/bitnami",
