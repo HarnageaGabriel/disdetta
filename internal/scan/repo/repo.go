@@ -80,7 +80,7 @@ func ScanWithOptions(ctx context.Context, root string, options Options) (diag.Re
 	var out diag.Report
 	entries := []repositoryEntry{}
 	err = walkRepository(ctx, root, func(entry repositoryEntry) error {
-		if excluded(entry.display, options.Exclude) {
+		if len(options.Exclude) != 0 && excluded(entry.display, options.Exclude) {
 			return nil
 		}
 		entries = append(entries, entry)

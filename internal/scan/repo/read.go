@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/HarnageaGabriel/disdetta/internal/detect"
 )
 
 var (
@@ -52,6 +54,14 @@ func walkRepository(ctx context.Context, root string, visit func(repositoryEntry
 			}
 			return nil
 		}
+		// The detectors read only a few kinds of file. A regular file with
+		// another name cannot change the report, so it is dropped before the
+		// metadata lookup and before the relative path is built. The entries
+		// that are not regular keep their diagnostics: a link and a device are
+		// still reported as skipped.
+		if entry.Type().IsRegular() && !scannableName(strings.ToLower(filepath.Base(path)), path) {
+			return nil
+		}
 		display := filepath.Base(path)
 		if rel, err := filepath.Rel(root, path); err == nil && rel != "." {
 			display = filepath.ToSlash(rel)
@@ -68,6 +78,32 @@ func walkRepository(ctx context.Context, root string, visit func(repositoryEntry
 		}
 		return visit(repositoryEntry{path: path, display: display, info: info})
 	})
+}
+
+// scannableName reports whether a file whose lower-cased base name is
+// lowerBase can be consumed by one of the repository detectors. It looks at
+// the name only, so the walk can decide before it looks at the metadata of
+// the file.
+//
+// The names are the ones scanFile reads: a file that is not scannable here is
+// not read by the scan either, so dropping it in the walk leaves the report
+// unchanged. The Kustomization flag of scanFile only makes a file scannable
+// when the file is the extensionless Kustomization: the other two names
+// kustomize accepts end in .yaml or .yml and are already covered.
+func scannableName(lowerBase, path string) bool {
+	if lowerBase == ".disdetta.yaml" {
+		return false
+	}
+	if strings.HasSuffix(lowerBase, ".yaml") || strings.HasSuffix(lowerBase, ".yml") {
+		return true
+	}
+	if lowerBase == "dockerfile" || strings.HasPrefix(lowerBase, "dockerfile.") || strings.HasSuffix(lowerBase, ".dockerfile") {
+		return true
+	}
+	if strings.HasSuffix(lowerBase, ".tpl") || strings.HasSuffix(lowerBase, ".yaml.gotmpl") || strings.HasSuffix(lowerBase, ".tf") {
+		return true
+	}
+	return len(lowerBase) == len("kustomization") && detect.IsKustomizationFile(path)
 }
 
 // ReadFile performs the bounded, regular-file-only read used by repository
