@@ -50,3 +50,29 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         # VERIFY: pinned for reproducible CI; update deliberately.
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  action:
+    name: Action shell tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          # The tests run under Git Bash on Windows, with the real tar
+          # and the real unzip of Git for Windows. Only the case of a
+          # real symbolic link is skipped there: Git Bash copies the
+          # file instead of linking it.
+          - windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Syntax check
+        shell: bash
+        run: bash -n action/run.sh
+      - name: Syntax check of the tests
+        shell: bash
+        run: bash -n action/run_test.sh
+      - name: Run the offline tests of the composite action
+        shell: bash
+        run: bash action/run_test.sh

@@ -1,0 +1,52 @@
+name: disdetta
+description: Find Bitnami dependencies in a repository and gate the pull request.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: File or directory to scan. A path that starts with a dash is scanned as a path.
+    required: false
+    default: .
+  fail-on:
+    description: Failure threshold (none, low, medium or high).
+    required: false
+    default: high
+  format:
+    description: Output format (text, json or sarif).
+    required: false
+    default: text
+  version:
+    description: Release to download (vMAJOR.MINOR.PATCH or vMAJOR); an exact vMAJOR.MINOR.PATCH tag is recommended. Defaults to the action's own tag. Required when the action is pinned by commit SHA.
+    required: false
+    default: ''
+  upload-sarif:
+    description: Upload SARIF to GitHub code scanning (requires security-events write).
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Install cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 (cosign v3.0.6)
+    - name: Download, verify, and run disdetta
+      id: run
+      shell: bash
+      env:
+        DISDETTA_ACTION_PATH: ${{ github.action_path }}
+        DISDETTA_ACTION_REF: ${{ github.action_ref }}
+        DISDETTA_ACTION_REPOSITORY: ${{ github.action_repository }}
+        DISDETTA_GITHUB_TOKEN: ${{ github.token }}
+        DISDETTA_INPUT_PATH: ${{ inputs.path }}
+        DISDETTA_INPUT_FORMAT: ${{ inputs.format }}
+        DISDETTA_INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        DISDETTA_VERSION: ${{ inputs.version }}
+        DISDETTA_SARIF_FILE: ${{ runner.temp }}/disdetta-results.sarif
+      run: bash "$DISDETTA_ACTION_PATH/action/run.sh"
+    - name: Upload SARIF
+      if: ${{ always() && inputs.format == 'sarif' && inputs.upload-sarif == 'true' && steps.run.outputs.sarif-written == 'true' }}
+      uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      with:
+        sarif_file: ${{ runner.temp }}/disdetta-results.sarif
