@@ -18,6 +18,10 @@ import (
 // exported so the client and its tests agree on pagination.
 const ListLimit = 500
 
+// defaultScanTimeout is the total time budget of a cluster scan when no
+// --timeout is given (spec v0.2 section 4, audit F2).
+const defaultScanTimeout = 30 * time.Second
+
 // Tier 2 label keys (spec v0.2 section 2).
 const (
 	labelChart    = "helm.sh/chart"
@@ -31,7 +35,12 @@ type Options struct {
 	Kubeconfig      string
 	Namespaces      []string
 	ReadHelmSecrets bool
-	Timeout         time.Duration
+	// Timeout is the total time budget of the scan, not the timeout of one
+	// list (spec v0.2 section 4, audit F2).
+	Timeout time.Duration
+	// DenyExecPlugins refuses a kubeconfig whose selected user runs a
+	// credential plugin, because client-go would execute it (audit F3).
+	DenyExecPlugins bool
 }
 
 // chartMetadata is the subset of Helm chart metadata the scan reads, from the
@@ -62,17 +71,32 @@ type decodedRelease struct {
 // Scan reads the cluster through source and returns a deterministic report
 // (spec v0.2). source issues read-only list calls only (ADR 0007). The returned
 // error is non-nil only when ctx is cancelled; a list that fails is a
-// DSD-SCN-010 diagnostic and the scan continues.
+// DSD-SCN-010 diagnostic, a list that reaches a safety limit a DSD-SCN-005 one,
+// and the scan continues.
+//
+// The whole scan shares one deadline, derived from the --timeout value, which
+// is the total time budget of the scan (audit F2). When the budget is spent,
+// the scan stops cleanly, reports the objects it did read and one diagnostic
+// that says the scan is incomplete.
 func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error) {
 	var out diag.Report
 	mandatoryIncomplete := false
 
-	workloads, failures := source.ListWorkloads(ctx, opts.Namespaces)
+	budget := opts.Timeout
+	if budget <= 0 {
+		budget = defaultScanTimeout
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	workloads, failures := source.ListWorkloads(scanCtx, opts.Namespaces)
 	for _, f := range failures {
-		out.Diagnostics = append(out.Diagnostics, listDiagnostic(f))
-		if f.Forbidden && f.Tier <= 2 {
-			mandatoryIncomplete = true
+		if f.Deadline {
+			// The budget stopped this list; one budget diagnostic reports it.
+			continue
 		}
+		out.Diagnostics = append(out.Diagnostics, listDiagnostic(f))
+		mandatoryIncomplete = true
 	}
 	// summary.filesScanned counts the cluster objects read (spec v0.2 section 3).
 	out.Summary.FilesScanned += len(workloads.Templates) + len(workloads.Pods)
@@ -90,15 +114,13 @@ func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error)
 	}
 
 	if opts.ReadHelmSecrets {
-		releases, relFailures := source.ListReleases(ctx, opts.Namespaces)
+		releases, relFailures := source.ListReleases(scanCtx, opts.Namespaces)
 		for _, f := range relFailures {
-			out.Diagnostics = append(out.Diagnostics, listDiagnostic(f))
-			if f.Forbidden {
-				// Tier 3 is off by default, but a requested list that RBAC forbids
-				// means the requested scan is incomplete (review 03 M2, spec v0.2
-				// section 4).
-				mandatoryIncomplete = true
+			if f.Deadline {
+				continue
 			}
+			out.Diagnostics = append(out.Diagnostics, listDiagnostic(f))
+			mandatoryIncomplete = true
 		}
 		out.Summary.FilesScanned += len(releases)
 		for _, rel := range releases {
@@ -115,6 +137,10 @@ func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error)
 	assignFingerprints(out.Findings)
 	out.Summary.Releases, out.Groups = diag.ClusterSummary(out.Findings)
 	out.Summary.Findings = countSeverities(out.Findings)
+	if scanCtx.Err() != nil {
+		out.Diagnostics = append(out.Diagnostics, budgetDiagnostic(budget))
+		mandatoryIncomplete = true
+	}
 	sortDiagnostics(out.Diagnostics)
 	out.Summary.Diagnostics = len(out.Diagnostics)
 	out.Summary.Complete = !mandatoryIncomplete
@@ -467,22 +493,45 @@ func countSeverities(findings []diag.Finding) diag.FindingCounts {
 }
 
 // listDiagnostic renders one failed list as DSD-SCN-010 (spec v0.2 sections 4,
-// 5). A forbidden list is a warning; any other failure is an error. No API error
-// text is echoed.
+// 5). A forbidden list is a warning; any other failure is an error. A list that
+// reached a safety limit is DSD-SCN-005, a warning. No API error text is
+// echoed.
 func listDiagnostic(f ListFailure) diag.Diagnostic {
+	code := f.Code
+	if code == "" {
+		code = "DSD-SCN-010"
+	}
 	level, reason := diag.LevelError, "failed"
-	if f.Forbidden {
+	switch {
+	case code == "DSD-SCN-005":
+		level, reason = diag.LevelWarning, "reached a safety limit"
+	case f.Forbidden:
 		level, reason = diag.LevelWarning, "is forbidden by RBAC"
 	}
 	namespace := f.Namespace
 	if namespace == "" {
 		namespace = "all"
 	}
+	message := fmt.Sprintf("tier %d list of %s in namespace %s %s", f.Tier, f.Resource, namespace, reason)
+	if f.Detail != "" {
+		message += ": " + f.Detail
+	}
 	return diag.Diagnostic{
-		Code:     "DSD-SCN-010",
+		Code:     code,
 		Level:    level,
-		Message:  fmt.Sprintf("tier %d list of %s in namespace %s %s; the tier is not fully scanned", f.Tier, f.Resource, namespace, reason),
+		Message:  message + "; the tier is not fully scanned",
 		Location: diag.Location{Path: "cluster/" + namespace + "/" + f.Resource},
+	}
+}
+
+// budgetDiagnostic reports that the scan spent its total time budget: the
+// objects it did not read are unknown, so the scan is incomplete (audit F2).
+func budgetDiagnostic(budget time.Duration) diag.Diagnostic {
+	return diag.Diagnostic{
+		Code:     "DSD-SCN-005",
+		Level:    diag.LevelWarning,
+		Message:  fmt.Sprintf("the scan spent its total time budget of %s; the scan is incomplete", budget),
+		Location: diag.Location{Path: "cluster"},
 	}
 }
 

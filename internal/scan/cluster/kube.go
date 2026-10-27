@@ -2,7 +2,10 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"sort"
 	"strconv"
 	"time"
@@ -11,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -18,13 +22,30 @@ import (
 // (research notes section 9).
 const helmReleaseSecretType = "helm.sh/release.v1"
 
-// defaultListTimeout bounds one paginated list when no --timeout is given
-// (spec v0.2 section 4, review 03 m8).
-const defaultListTimeout = 30 * time.Second
+// defaultRequestTimeout bounds one request when the scan budget leaves more time
+// (spec v0.2 section 4).
+const defaultRequestTimeout = 30 * time.Second
 
 // releaseListLimit is the page size for the tier 3 Secret list. It is smaller
 // than ListLimit so one page of Secret payloads stays bounded (review 03 M1).
 const releaseListLimit = 50
+
+// The bounds a hostile API server cannot pass (adversarial audit F1). Every
+// bound is reported, never a silent truncation.
+//
+// MaxListResponseBytes is the hard limit on the bytes one list response may
+// deliver. The response is never transparently decompressed, so a compressed
+// body is read as it arrives and cannot expand.
+const MaxListResponseBytes = 64 << 20
+
+// MaxItemsPerList is the largest number of items one list accumulates. A list
+// that reaches it stops with a DSD-SCN-005 diagnostic.
+const MaxItemsPerList = 100000
+
+// MaxPagesPerList is the largest number of pages one list fetches. A server
+// that always answers with a continuation token stops at this cap with a
+// DSD-SCN-005 diagnostic.
+const MaxPagesPerList = 1000
 
 // Tier 3 Secret selectors: the server filters to deployed Helm release Secrets
 // by label and to the release type by field (Secrets support the type field
@@ -37,7 +58,7 @@ const (
 
 // ClientSource is the client-go implementation of Source (ADR 0007). It issues
 // list calls only, paginated with ListLimit (releaseListLimit for tier 3
-// Secrets) and bounded by a whole-list timeout.
+// Secrets) and bounded by a per-request timeout.
 type ClientSource struct {
 	client  kubernetes.Interface
 	timeout time.Duration
@@ -55,19 +76,148 @@ func NewClientSource(opts Options) (Source, error) {
 	if opts.Context != "" {
 		overrides.CurrentContext = opts.Context
 	}
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
+	deferred := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+	config, err := deferred.ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig: %w", err)
+	}
+	if opts.DenyExecPlugins {
+		if err := refuseExecPlugins(deferred, overrides, config); err != nil {
+			return nil, err
+		}
+	}
+	// The API server is untrusted for content (threat model T2, audit F1):
+	// no transparent decompression and a hard limit on every response body.
+	config.DisableCompression = true
+	config.WrapTransport = func(rt http.RoundTripper) http.RoundTripper {
+		return &hardeningTransport{base: rt}
 	}
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("build kubernetes client: %w", err)
 	}
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = defaultListTimeout
+	return &ClientSource{client: client, timeout: defaultRequestTimeout}, nil
+}
+
+// refuseExecPlugins refuses a kubeconfig whose selected user runs a credential
+// plugin: client-go executes the command of an exec provider and the binary of
+// an auth provider, so a hostile kubeconfig runs a program on the machine of
+// the scan (threat model T13, audit F3). The check runs before the client is
+// built, so no plugin ever runs.
+func refuseExecPlugins(deferred clientcmd.ClientConfig, overrides *clientcmd.ConfigOverrides, config *rest.Config) error {
+	name := selectedUserName(deferred, overrides)
+	switch {
+	case config.ExecProvider != nil:
+		return fmt.Errorf("kubeconfig user %q uses an exec credential plugin, which runs a program; --deny-exec-plugins refuses it", name)
+	case config.AuthProvider != nil:
+		return fmt.Errorf("kubeconfig user %q uses an auth provider plugin, which runs a program; --deny-exec-plugins refuses it", name)
 	}
-	return &ClientSource{client: client, timeout: timeout}, nil
+	return nil
+}
+
+// selectedUserName returns the name of the user the selected context uses, or
+// an empty name when the kubeconfig names none.
+func selectedUserName(deferred clientcmd.ClientConfig, overrides *clientcmd.ConfigOverrides) string {
+	raw, err := deferred.RawConfig()
+	if err != nil {
+		return ""
+	}
+	contextName := overrides.CurrentContext
+	if contextName == "" {
+		contextName = raw.CurrentContext
+	}
+	if contextName == "" {
+		return ""
+	}
+	kubeContext, ok := raw.Contexts[contextName]
+	if !ok {
+		return ""
+	}
+	return kubeContext.AuthInfo
+}
+
+// hardeningTransport wraps the client-go transport so a hostile API server
+// cannot make the scan allocate unbounded memory and cannot redirect the
+// bearer token to another endpoint (audit F1, F4).
+type hardeningTransport struct {
+	base http.RoundTripper
+}
+
+// RoundTrip refuses a redirect answer and bounds the body of every other
+// answer.
+func (t *hardeningTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("Accept-Encoding") == "" {
+		// client-go falls back to http.DefaultTransport when the kubeconfig
+		// needs no TLS option, and that transport ignores DisableCompression.
+		// Asking for the identity encoding keeps the answer uncompressed
+		// whatever transport is below, so no body is ever transparently
+		// expanded (audit F1).
+		req = req.Clone(req.Context())
+		req.Header.Set("Accept-Encoding", "identity")
+	}
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// client-go owns the http.Client, so the redirect policy is enforced
+		// here: a 3xx answer is refused, never followed, and the Location is
+		// never read. The bearer token never leaves the API server.
+		_ = resp.Body.Close()
+		return nil, &redirectError{status: resp.StatusCode}
+	}
+	if resp.Body != nil {
+		resp.Body = &limitedBody{body: resp.Body}
+	}
+	return resp, nil
+}
+
+// limitedBody reads at most MaxListResponseBytes bytes of a response body and
+// fails the read when the limit is passed, so an over-limit response is an
+// error and never a silent truncation (audit F1).
+type limitedBody struct {
+	body io.ReadCloser
+	read int64
+}
+
+// Read reads one chunk and fails when the limit is passed.
+func (b *limitedBody) Read(p []byte) (int, error) {
+	if b.read >= MaxListResponseBytes {
+		return 0, errResponseTooLarge
+	}
+	if remaining := MaxListResponseBytes - b.read + 1; int64(len(p)) > remaining {
+		p = p[:int(remaining)]
+	}
+	n, err := b.body.Read(p)
+	b.read += int64(n)
+	if b.read > MaxListResponseBytes {
+		return 0, errResponseTooLarge
+	}
+	return n, err
+}
+
+// Close closes the underlying body.
+func (b *limitedBody) Close() error {
+	return b.body.Close()
+}
+
+// errResponseTooLarge marks a response body over MaxListResponseBytes.
+var errResponseTooLarge = fmt.Errorf("response body over the MaxListResponseBytes limit of %d bytes", MaxListResponseBytes)
+
+// errItemLimit marks a list that reached MaxItemsPerList.
+var errItemLimit = fmt.Errorf("list reached the MaxItemsPerList limit of %d items", MaxItemsPerList)
+
+// errPageLimit marks a list that reached MaxPagesPerList.
+var errPageLimit = fmt.Errorf("list reached the MaxPagesPerList limit of %d pages", MaxPagesPerList)
+
+// redirectError marks a 3xx answer the client refuses to follow.
+type redirectError struct {
+	status int
+}
+
+// Error names the status of the refused redirect and never the Location.
+func (e *redirectError) Error() string {
+	return fmt.Sprintf("redirect response status %d is not followed", e.status)
 }
 
 // ListWorkloads reads the tier 1 and 2 objects (spec v0.2 section 2). A kind or
@@ -104,7 +254,7 @@ func (s *ClientSource) ListReleases(ctx context.Context, namespaces []string) ([
 
 func (s *ClientSource) deployments(ctx context.Context, namespace string, owners ownerIndex, failures *[]ListFailure) []Workload {
 	var out []Workload
-	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		list, err := s.client.AppsV1().Deployments(namespace).List(pageCtx, opts)
 		if err != nil {
 			return "", err
@@ -112,6 +262,9 @@ func (s *ClientSource) deployments(ctx context.Context, namespace string, owners
 		for i := range list.Items {
 			item := &list.Items[i]
 			indexOwners(owners, item.Namespace, "Deployment", item.Name, item.OwnerReferences)
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			out = append(out, newWorkload(item, "Deployment", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -124,7 +277,7 @@ func (s *ClientSource) deployments(ctx context.Context, namespace string, owners
 
 func (s *ClientSource) statefulSets(ctx context.Context, namespace string, owners ownerIndex, failures *[]ListFailure) []Workload {
 	var out []Workload
-	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		list, err := s.client.AppsV1().StatefulSets(namespace).List(pageCtx, opts)
 		if err != nil {
 			return "", err
@@ -132,6 +285,9 @@ func (s *ClientSource) statefulSets(ctx context.Context, namespace string, owner
 		for i := range list.Items {
 			item := &list.Items[i]
 			indexOwners(owners, item.Namespace, "StatefulSet", item.Name, item.OwnerReferences)
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			out = append(out, newWorkload(item, "StatefulSet", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -144,7 +300,7 @@ func (s *ClientSource) statefulSets(ctx context.Context, namespace string, owner
 
 func (s *ClientSource) daemonSets(ctx context.Context, namespace string, owners ownerIndex, failures *[]ListFailure) []Workload {
 	var out []Workload
-	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		list, err := s.client.AppsV1().DaemonSets(namespace).List(pageCtx, opts)
 		if err != nil {
 			return "", err
@@ -152,6 +308,9 @@ func (s *ClientSource) daemonSets(ctx context.Context, namespace string, owners 
 		for i := range list.Items {
 			item := &list.Items[i]
 			indexOwners(owners, item.Namespace, "DaemonSet", item.Name, item.OwnerReferences)
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			out = append(out, newWorkload(item, "DaemonSet", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -164,7 +323,7 @@ func (s *ClientSource) daemonSets(ctx context.Context, namespace string, owners 
 
 func (s *ClientSource) replicaSets(ctx context.Context, namespace string, owners ownerIndex, failures *[]ListFailure) []Workload {
 	var out []Workload
-	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		list, err := s.client.AppsV1().ReplicaSets(namespace).List(pageCtx, opts)
 		if err != nil {
 			return "", err
@@ -176,6 +335,9 @@ func (s *ClientSource) replicaSets(ctx context.Context, namespace string, owners
 			// (spec v0.2 section 2, owner filtering).
 			if ownedBy(item.OwnerReferences, "Deployment") {
 				continue
+			}
+			if !budget.add() {
+				return "", errItemLimit
 			}
 			out = append(out, newWorkload(item, "ReplicaSet", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
@@ -189,7 +351,7 @@ func (s *ClientSource) replicaSets(ctx context.Context, namespace string, owners
 
 func (s *ClientSource) jobs(ctx context.Context, namespace string, owners ownerIndex, failures *[]ListFailure) []Workload {
 	var out []Workload
-	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		list, err := s.client.BatchV1().Jobs(namespace).List(pageCtx, opts)
 		if err != nil {
 			return "", err
@@ -201,6 +363,9 @@ func (s *ClientSource) jobs(ctx context.Context, namespace string, owners ownerI
 			// section 2, owner filtering).
 			if ownedBy(item.OwnerReferences, "CronJob") {
 				continue
+			}
+			if !budget.add() {
+				return "", errItemLimit
 			}
 			out = append(out, newWorkload(item, "Job", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
@@ -214,7 +379,7 @@ func (s *ClientSource) jobs(ctx context.Context, namespace string, owners ownerI
 
 func (s *ClientSource) cronJobs(ctx context.Context, namespace string, owners ownerIndex, failures *[]ListFailure) []Workload {
 	var out []Workload
-	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		list, err := s.client.BatchV1().CronJobs(namespace).List(pageCtx, opts)
 		if err != nil {
 			return "", err
@@ -222,6 +387,9 @@ func (s *ClientSource) cronJobs(ctx context.Context, namespace string, owners ow
 		for i := range list.Items {
 			item := &list.Items[i]
 			indexOwners(owners, item.Namespace, "CronJob", item.Name, item.OwnerReferences)
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			out = append(out, newWorkload(item, "CronJob", item.Spec.JobTemplate.Spec.Template.Spec, item.Spec.JobTemplate.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -234,12 +402,15 @@ func (s *ClientSource) cronJobs(ctx context.Context, namespace string, owners ow
 
 func (s *ClientSource) pods(ctx context.Context, namespace string, owners ownerIndex, failures *[]ListFailure) []Pod {
 	var out []Pod
-	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, ListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		list, err := s.client.CoreV1().Pods(namespace).List(pageCtx, opts)
 		if err != nil {
 			return "", err
 		}
 		for i := range list.Items {
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			out = append(out, newPod(owners, &list.Items[i]))
 		}
 		return list.Continue, nil
@@ -267,7 +438,7 @@ type helmRevision struct {
 // decoding happens in the pure layer (spec v0.2 section 4).
 func (s *ClientSource) releaseSecrets(ctx context.Context, namespace string, failures *[]ListFailure) []Release {
 	best := map[string]helmRevision{}
-	err := s.listPages(ctx, releaseListLimit, func(pageCtx context.Context, opts metav1.ListOptions) (string, error) {
+	err := s.listPages(ctx, releaseListLimit, func(pageCtx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error) {
 		opts.LabelSelector = helmReleaseLabelSelector
 		opts.FieldSelector = helmReleaseFieldSelector
 		list, err := s.client.CoreV1().Secrets(namespace).List(pageCtx, opts)
@@ -285,6 +456,9 @@ func (s *ClientSource) releaseSecrets(ctx context.Context, namespace string, fai
 			payload := secret.Data["release"]
 			if name == "" || len(payload) == 0 {
 				continue
+			}
+			if !budget.add() {
+				return "", errItemLimit
 			}
 			version, _ := strconv.Atoi(secret.Labels["version"])
 			key := secret.Namespace + "\x00" + name
@@ -326,27 +500,71 @@ func betterRevision(candidate, best helmRevision) bool {
 	return candidate.version > best.version
 }
 
-// listPages runs fn for every page of one paginated list. The timeout bounds the
-// whole paginated list, not each page, and paging stops as soon as the context
-// ends (review 03 m8, spec v0.2 section 4). It stops at the first error and
+// listBudget counts the items and the pages one list may consume.
+type listBudget struct {
+	items int
+	pages int
+}
+
+// add reserves one item of the list and reports false when the item cap is
+// reached (audit F1).
+func (b *listBudget) add() bool {
+	if b.items >= MaxItemsPerList {
+		return false
+	}
+	b.items++
+	return true
+}
+
+// listPages runs fn for every page of one paginated list. Each request is
+// bounded by the per-request timeout and by the remaining scan budget, and the
+// list stops at the page cap (audit F1). It stops at the first error and
 // returns it.
-func (s *ClientSource) listPages(ctx context.Context, limit int64, fn func(ctx context.Context, opts metav1.ListOptions) (string, error)) error {
-	listCtx, cancel := context.WithTimeout(ctx, s.timeout)
+func (s *ClientSource) listPages(ctx context.Context, limit int64, fn func(ctx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error)) error {
+	requestCtx, cancel := context.WithTimeout(ctx, s.requestTimeout(ctx))
 	defer cancel()
+	budget := &listBudget{}
 	cont := ""
 	for {
-		if err := listCtx.Err(); err != nil {
+		if err := requestCtx.Err(); err != nil {
 			return err
 		}
-		next, err := fn(listCtx, metav1.ListOptions{Limit: limit, Continue: cont})
+		next, err := fn(requestCtx, metav1.ListOptions{Limit: limit, Continue: cont}, budget)
 		if err != nil {
+			if ctxErr := requestCtx.Err(); ctxErr != nil {
+				// The scan budget ended the request: report the budget, not
+				// the API error.
+				return ctxErr
+			}
 			return err
 		}
+		budget.pages++
 		if next == "" {
 			return nil
 		}
+		if budget.pages >= MaxPagesPerList {
+			return errPageLimit
+		}
 		cont = next
 	}
+}
+
+// requestTimeout returns the timeout of one request: the smaller of the
+// remaining scan budget and the per-request cap (audit F2).
+func (s *ClientSource) requestTimeout(ctx context.Context) time.Duration {
+	timeout := s.timeout
+	if timeout <= 0 {
+		timeout = defaultRequestTimeout
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < timeout {
+			timeout = remaining
+		}
+	}
+	if timeout <= 0 {
+		timeout = time.Nanosecond
+	}
+	return timeout
 }
 
 // namespaceTargets returns the namespaces to list: the requested ones in sorted
@@ -369,9 +587,29 @@ func namespaceTargets(namespaces []string) []string {
 	return out
 }
 
-// listFailure records one failed list; Forbidden marks an RBAC denial.
+// listFailure records one failed list; Forbidden marks an RBAC denial. The
+// detail names the limit or the status that stopped the list and never carries
+// server content (audit F1, F4).
 func listFailure(tier int, resource, namespace string, err error) ListFailure {
-	return ListFailure{Tier: tier, Resource: resource, Namespace: namespace, Forbidden: apierrors.IsForbidden(err)}
+	failure := ListFailure{Tier: tier, Resource: resource, Namespace: namespace, Forbidden: apierrors.IsForbidden(err)}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		failure.Deadline = true
+	case errors.Is(err, errItemLimit):
+		failure.Code = "DSD-SCN-005"
+		failure.Detail = errItemLimit.Error()
+	case errors.Is(err, errPageLimit):
+		failure.Code = "DSD-SCN-005"
+		failure.Detail = errPageLimit.Error()
+	case errors.Is(err, errResponseTooLarge):
+		failure.Detail = errResponseTooLarge.Error()
+	default:
+		var redirect *redirectError
+		if errors.As(err, &redirect) {
+			failure.Detail = redirect.Error()
+		}
+	}
+	return failure
 }
 
 // newWorkload converts one pod-template-bearing object (spec v0.2 section 2).

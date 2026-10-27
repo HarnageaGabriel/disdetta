@@ -53,6 +53,63 @@ func TestTableEscapesFormatCharacters(t *testing.T) {
 	}
 }
 
+// audit F5: the JSON writer escapes the Unicode format characters that
+// SafeText escapes in the table, so no raw bidi override or zero-width
+// character survives in the machine-readable output. The escape is lossless: a
+// JSON parser decodes it back to the original character.
+func TestJSONEscapesFormatCharacters(t *testing.T) {
+	name := "web\u202etxt\u2066"
+	r := diag.Report{
+		Summary: diag.Summary{Complete: true},
+		Findings: []diag.Finding{{
+			RuleID: "DSD-IMG-002", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactHigh,
+			Location:  diag.Location{Path: "cluster/db/Deployment/" + name},
+			Reference: "docker.io/bitnami/redis:7",
+			Resource:  &diag.Resource{Namespace: "db", Kind: "Deployment", Name: name, Container: "web"},
+		}},
+		Diagnostics: []diag.Diagnostic{{Code: "DSD-SCN-010", Level: diag.LevelWarning, Message: "hostile \u202e name", Location: diag.Location{Path: "cluster/db/" + name}}},
+	}
+	var b bytes.Buffer
+	if err := JSON(&b, r); err != nil {
+		t.Fatal(err)
+	}
+	out := b.Bytes()
+	if bytes.Contains(out, []byte("\u202e")) || bytes.Contains(out, []byte("\u2066")) {
+		t.Fatalf("audit F5: raw format character in the JSON: %s", out)
+	}
+	if !bytes.Contains(out, []byte(`\u202e`)) || !bytes.Contains(out, []byte(`\u2066`)) {
+		t.Fatalf("audit F5: not escaped in the JSON: %s", out)
+	}
+	var decoded struct {
+		Findings []struct {
+			Location struct {
+				Path string `json:"path"`
+			} `json:"location"`
+			Resource struct {
+				Name string `json:"name"`
+			} `json:"resource"`
+		} `json:"findings"`
+		Diagnostics []struct {
+			Message  string `json:"message"`
+			Location struct {
+				Path string `json:"path"`
+			} `json:"location"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Findings[0].Location.Path != "cluster/db/Deployment/"+name {
+		t.Errorf("audit F5: the JSON does not decode back to the original path: %q", decoded.Findings[0].Location.Path)
+	}
+	if decoded.Findings[0].Resource.Name != name {
+		t.Errorf("audit F5: the JSON does not decode back to the original name: %q", decoded.Findings[0].Resource.Name)
+	}
+	if decoded.Diagnostics[0].Message != "hostile \u202e name" || decoded.Diagnostics[0].Location.Path != "cluster/db/"+name {
+		t.Errorf("audit F5: the JSON does not decode back to the original diagnostic: %#v", decoded.Diagnostics[0])
+	}
+}
+
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("boom") }

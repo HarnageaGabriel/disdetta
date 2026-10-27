@@ -81,6 +81,16 @@ type ListFailure struct {
 	Resource  string
 	Namespace string
 	Forbidden bool
+	// Code is the diagnostic code of the failure. An empty code is
+	// DSD-SCN-010, the code of a list that failed.
+	Code string
+	// Detail names the limit or the status that stopped the list. It never
+	// carries server content.
+	Detail string
+	// Deadline marks a list that the total time budget of the scan cut short.
+	// The scan reports one budget diagnostic instead of one diagnostic per
+	// list (spec v0.2 section 4).
+	Deadline bool
 }
 
 // Source lists the objects the cluster scan reads (ADR 0007). Implementations

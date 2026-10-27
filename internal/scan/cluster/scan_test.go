@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"github.com/HarnageaGabriel/disdetta/internal/report"
@@ -323,6 +327,64 @@ func TestScanMirrorScopedToWorkload(t *testing.T) {
 	}
 	if mirrored["other/redis"] {
 		t.Errorf("review 03 m2: mirror leaked to another workload with the same image")
+	}
+}
+
+// TestScanTotalTimeBudget checks adversarial audit F2: the --timeout value is
+// the total time budget of the scan, not the timeout of one list, so a
+// stalling server cannot make the scan run for timeout x namespaces x kinds.
+// The scan stops cleanly, reports what it read and one diagnostic that says
+// the scan is incomplete.
+func TestScanTotalTimeBudget(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	source := newHTTPSource(t, server.URL)
+	start := time.Now()
+	got, err := Scan(context.Background(), source, Options{Timeout: 700 * time.Millisecond, Namespaces: []string{"a", "b", "c"}})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("audit F2: the scan ran for %s with a budget of 700ms", elapsed)
+	}
+	if got.Summary.Complete {
+		t.Error("audit F2: a scan that ran out of budget reported complete")
+	}
+	if len(got.Diagnostics) != 1 {
+		t.Fatalf("audit F2: want one diagnostic, got %#v", got.Diagnostics)
+	}
+	if got.Diagnostics[0].Code != "DSD-SCN-005" || !strings.Contains(got.Diagnostics[0].Message, "time budget") {
+		t.Errorf("audit F2: diagnostic %#v", got.Diagnostics[0])
+	}
+}
+
+// TestScanListLimitDiagnostic checks adversarial audit F1: a list that reached
+// a safety limit is reported as DSD-SCN-005 and the scan is incomplete.
+func TestScanListLimitDiagnostic(t *testing.T) {
+	source := &fakeSource{workloadFailures: []ListFailure{{Tier: 1, Resource: "pods", Namespace: "db", Code: "DSD-SCN-005", Detail: "list reached the MaxItemsPerList limit of 100000 items"}}}
+	got, err := Scan(context.Background(), source, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasDiagnostic(got, "DSD-SCN-005", diag.LevelWarning) {
+		t.Fatalf("audit F1: no DSD-SCN-005: %#v", got.Diagnostics)
+	}
+	if got.Summary.Complete {
+		t.Error("audit F1: a list that hit a limit must leave the scan incomplete")
+	}
+	for _, d := range got.Diagnostics {
+		if !strings.Contains(d.Message, "MaxItemsPerList") {
+			t.Errorf("audit F1: the diagnostic does not name the limit: %q", d.Message)
+		}
 	}
 }
 

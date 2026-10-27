@@ -19,15 +19,17 @@ Status: accepted (2026-10-14). Covers the repository scan (v0.1) and the cluster
 | --- | --- | --- | --- |
 | T1 | Secret leaked to stdout, CI logs, JSON or SARIF | Only the reference itself is printed; nothing under a Kubernetes `Secret`; userinfo stripped; template bodies replaced by `{{...}}`; redaction tests per rule | Done (repo scan) |
 | T2 | Helm release Secrets read with broad RBAC, payload exposed | Opt-in `--read-helm-secrets`; server-side selectors (`owner=helm,status=deployed`, field `type=helm.sh/release.v1`) plus a client-side type check; payloads decoded in memory, processed per page and dropped; diagnostics carry fixed messages only; never cached to disk; RBAC documented in `docs/cluster-rbac.md` (Kubernetes RBAC cannot restrict by Secret type: prefer namespace-scoped bindings). Tests plant a password and a token and assert they appear in no output | Done (v0.2) |
-| T3 | Decompression bomb in a Helm release payload | Encoded-length check before base64 decoding, 4 MiB compressed cap, 32 MiB decompressed cap, 100:1 ratio cap, single gzip member; over a cap is `DSD-SCN-009` and the scan is incomplete. List calls are bounded by a timeout across all pages | Done (v0.2) |
+| T3 | Decompression bomb in a Helm release payload | Encoded-length check before base64 decoding, 4 MiB compressed cap, 32 MiB decompressed cap, 100:1 ratio cap, single gzip member; over a cap is `DSD-SCN-009` and the scan is incomplete. List calls share the total time budget of the scan (T12) | Done (v0.2) |
 | T4 | Hostile YAML: deep nesting, alias explosion ("billion laughs"), huge files | File size cap (16 MiB), depth cap (256), alias node budget with cycle guard, per-file errors are diagnostics | Done |
 | T5 | Filesystem escape through symlinks, special files, path traversal in reported paths | Symlinks and non-regular files skipped and reported; paths reported relative to the root, slash-separated; no file is ever written | Done |
-| T6 | Terminal injection through file names or values (ANSI escapes, newlines forging rows) | Control characters escaped in every table cell; JSON encoding escapes by construction | Done |
+| T6 | Terminal injection through file names or values (ANSI escapes, newlines forging rows) | Control characters escaped in every table cell; the JSON and SARIF writers escape the Unicode format characters (the bidi overrides U+202A-U+202E, the isolates U+2066-U+2069, the zero-width characters) as a `\uXXXX` escape, so a JSON parser decodes the original text and no raw format character survives in the machine-readable output | Done |
 | T7 | Incomplete scan reported as clean | Exit code 3 on error-level diagnostics; summary always printed with `complete`; in the cluster scan a forbidden tier 1-2 list, or a forbidden tier 3 list when `--read-helm-secrets` was requested, makes the scan incomplete | Done |
 | T8 | Accidental write to the cluster | Only `list` calls are issued; no watch, discovery or SelfSubjectAccessReview; a fake-clientset reactor fails the test on any other verb | Done (v0.2) |
 | T9 | Supply chain of disdetta itself | Pinned CI tools, govulncheck, minimal dependencies with written reasons, reproducible builds, signed release checksums and provenance (M5) | Partial |
 | T10 | Network egress / telemetry | No network code outside the Kubernetes client; no telemetry; depguard forbids `net/http` in pure packages | Done |
 | T11 | Ignore file abused to hide findings | Reason and expiry required; expired entries do not suppress and are reported; ignored count in the summary | Done |
+| T12 | Hostile API server: a compressed or huge list answer, an endless continuation token, a redirect to another endpoint | The answer is never transparently decompressed (the client asks for the identity encoding), every response body is read through a hard limit of 64 MiB, a list stops at 100000 items or at 1000 pages, and a 3xx answer is refused instead of followed, so the bearer token never reaches the redirect target. Every bound is reported as `DSD-SCN-010` or `DSD-SCN-005` and the scan is incomplete | Done (v0.2) |
+| T13 | Hostile kubeconfig: the exec credential plugin of the selected user runs a program on the machine of the scan | The scan runs the plugin only when the user asks for it: `--deny-exec-plugins` refuses a kubeconfig whose selected user has an exec provider or an auth provider, with a usage error, before any plugin runs. Cloud kubeconfigs need their plugins, so the default is unchanged; use only kubeconfigs you trust | Done (v0.2) |
 
 ## Hostile repositories
 
@@ -108,9 +110,15 @@ These are known and are not fixed.
 - **The walk has no depth limit.** A repository with very deep directories is
   walked to the end. The scan is bounded in time by the number of files, not
   by the depth of the tree.
+- **One malformed object drops the whole page of a cluster list.** The
+  Kubernetes client decodes a list as one document, so a single malformed
+  object makes the whole page unreadable. The scan reports `DSD-SCN-010` for
+  that list and continues with the other lists, but the objects of that page
+  are not scanned. This is a known limitation of the cluster read and is not
+  changed.
 
 ## Out of scope
-Compromised kubeconfig or workstation; malicious catalog entries (they go through review); availability of the scanned systems (disdetta is read-only and bounded).
+Compromised workstation; malicious catalog entries (they go through review); availability of the scanned systems (disdetta is read-only and bounded). A kubeconfig is trusted input: the scan runs the credential plugin the kubeconfig names, because the cloud kubeconfigs need it; `--deny-exec-plugins` refuses such a kubeconfig for the runs that do not need a plugin (threat model T13).
 
 ## Review triggers
 Any change to: Secret handling, decompression, the Kubernetes client, redaction, output encoders, the ignore file. Such changes need the adversarial review and a maintainer read (CONVENTIONS.md).
