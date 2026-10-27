@@ -912,6 +912,243 @@ func TestHelmfileConcurrentScans(t *testing.T) {
 	}
 }
 
+// TestHelmfileSetValues checks the set and setString lists of a release: the
+// image references of the image key paths and the image guard are reported, in
+// YAML and in gotmpl files (spec sections 9 and 9.1).
+func TestHelmfileSetValues(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md sections 9 and 9.1"
+	const release = "releases:\n  - name: db\n    chart: stable/postgresql\n"
+	tests := []struct {
+		name  string
+		path  string
+		input string
+		want  []helmfileWant
+	}{
+		{
+			name:  "yaml set image repository",
+			path:  "helmfile.yaml",
+			input: release + "    set:\n      - name: image.repository\n        value: bitnamilegacy/postgresql\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 16, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+		{
+			// The components of the image of a release are joined: the
+			// mirror registry is part of the reference.
+			name: "yaml set registry repository and tag",
+			path: "helmfile.yaml",
+			input: release + "    set:\n      - name: image.registry\n        value: registry.example.com\n" +
+				"      - name: image.repository\n        value: bitnami/postgresql\n" +
+				"      - name: image.tag\n        value: 1.2.3\n",
+			want: []helmfileWant{{"DSD-IMG-004", 8, 16, "postgresql", "high", "inferred", "registry.example.com/bitnami/postgresql:1.2.3", "registry.example.com/bitnami/postgresql:1.2.3"}},
+		},
+		{
+			name:  "yaml setString image repository",
+			path:  "helmfile.yaml",
+			input: release + "    setString:\n      - name: image.repository\n        value: bitnamilegacy/postgresql\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 16, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+		{
+			// The image guard is reported at the value that switches it
+			// off.
+			name:  "yaml set image guard",
+			path:  "helmfile.yaml",
+			input: release + "    set:\n      - name: global.security.allowInsecureImages\n        value: true\n",
+			want:  []helmfileWant{{"DSD-CFG-001", 6, 16, "", "unknown", "confirmed", "true", "true"}},
+		},
+		{
+			// A templated value is never certain: the static part decides.
+			name:  "yaml set templated value with static evidence",
+			path:  "helmfile.yaml",
+			input: release + "    set:\n      - name: image.repository\n        value: bitnamilegacy/postgresql:{{ .Values.tag }}\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 16, "postgresql", "high", "unresolved", "docker.io/bitnamilegacy/postgresql:{{…}}", "bitnamilegacy/postgresql:{{…}}"}},
+		},
+		{
+			// An image of another namespace is not a finding.
+			name:  "yaml set image of another namespace",
+			path:  "helmfile.yaml",
+			input: release + "    set:\n      - name: image.repository\n        value: acme/postgresql\n",
+			want:  nil,
+		},
+		{
+			// A set entry with a file sets no value: it is ignored.
+			name:  "yaml set file entry",
+			path:  "helmfile.yaml",
+			input: release + "    set:\n      - file: values/postgresql.yaml\n",
+			want:  nil,
+		},
+		{
+			// The name of a whole image is an image key path too.
+			name:  "yaml set whole image",
+			path:  "helmfile.yaml",
+			input: release + "    set:\n      - name: image\n        value: bitnamilegacy/postgresql\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 16, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+		{
+			// The global registry of a release is the fallback of the
+			// registry of its image.
+			name: "yaml set global image registry",
+			path: "helmfile.yaml",
+			input: release + "    set:\n      - name: global.imageRegistry\n        value: registry.example.com\n" +
+				"      - name: image.repository\n        value: bitnami/postgresql\n",
+			want: []helmfileWant{{"DSD-IMG-004", 8, 16, "postgresql", "high", "inferred", "registry.example.com/bitnami/postgresql", "registry.example.com/bitnami/postgresql"}},
+		},
+		{
+			name:  "gotmpl set image repository",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + "    set:\n      - name: image.repository\n        value: bitnamilegacy/postgresql\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 16, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+		{
+			name: "gotmpl set registry repository and tag",
+			path: "helmfile.yaml.gotmpl",
+			input: release + "    set:\n      - name: image.registry\n        value: registry.example.com\n" +
+				"      - name: image.repository\n        value: bitnami/postgresql\n" +
+				"      - name: image.tag\n        value: 1.2.3\n",
+			want: []helmfileWant{{"DSD-IMG-004", 8, 16, "postgresql", "high", "inferred", "registry.example.com/bitnami/postgresql:1.2.3", "registry.example.com/bitnami/postgresql:1.2.3"}},
+		},
+		{
+			name:  "gotmpl setString image repository",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + "    setString:\n      - name: image.repository\n        value: bitnamilegacy/postgresql\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 16, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+		{
+			name:  "gotmpl set image guard",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + "    set:\n      - name: global.security.allowInsecureImages\n        value: true\n",
+			want:  []helmfileWant{{"DSD-CFG-001", 6, 16, "", "unknown", "confirmed", "true", "true"}},
+		},
+		{
+			name:  "gotmpl set templated value with static evidence",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + "    set:\n      - name: image.repository\n        value: bitnamilegacy/postgresql:{{ .Values.tag }}\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 16, "postgresql", "high", "unresolved", "docker.io/bitnamilegacy/postgresql:{{…}}", "bitnamilegacy/postgresql:{{…}}"}},
+		},
+		{
+			name:  "gotmpl set image of another namespace",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + "    set:\n      - name: image.repository\n        value: acme/postgresql\n",
+			want:  nil,
+		},
+		{
+			// The set list of a release is written at the indent of the
+			// key that opens it.
+			name:  "gotmpl set list at the indent of the key",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + "    set:\n    - name: image.repository\n      value: bitnamilegacy/postgresql\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 14, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+		{
+			// The set list of a release is written at the indent of the
+			// releases themselves.
+			name:  "gotmpl set list at column zero",
+			path:  "helmfile.yaml.gotmpl",
+			input: "releases:\n- name: db\n  chart: stable/postgresql\n  set:\n  - name: image.repository\n    value: bitnamilegacy/postgresql\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 12, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+		{
+			// The release that follows the set list is still a release.
+			name:  "gotmpl release after a set list at column zero",
+			path:  "helmfile.yaml.gotmpl",
+			input: "releases:\n- name: db\n  chart: stable/postgresql\n  set:\n  - name: image.repository\n    value: bitnamilegacy/postgresql\n- name: cache\n  chart: stable/redis\n",
+			want:  []helmfileWant{{"DSD-IMG-001", 6, 12, "postgresql", "high", "confirmed", "docker.io/bitnamilegacy/postgresql", "bitnamilegacy/postgresql"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := helmfileScan(tt.path, tt.input)
+			for _, finding := range got.Findings {
+				if helmfileLeaksTemplate(finding) {
+					t.Fatalf("source %s: template body leaked in %#v", source, finding)
+				}
+			}
+			assertHelmfileFindings(t, source, got, tt.want)
+		})
+	}
+}
+
+// helmfileLeaksTemplate reports whether a finding prints a template action.
+// A redacted reference keeps the placeholder of the template, never its body.
+func helmfileLeaksTemplate(finding diag.Finding) bool {
+	for _, text := range []string{finding.Reference, finding.Original, finding.Component} {
+		if strings.Contains(text, "{{") && !strings.Contains(text, "{{…}}") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestHelmfileInlineValuesRules checks that the inline values of a release
+// report the rules of a values document: the image triples and the image
+// guard, in YAML and in gotmpl files (spec sections 9 and 9.1).
+func TestHelmfileInlineValuesRules(t *testing.T) {
+	const source = "https://helmfile.readthedocs.io and docs/spec/v0.1.md sections 9 and 9.1"
+	const release = "releases:\n  - name: minio\n    chart: stable/minio\n    values:\n"
+	const values = "      - image:\n          repository: bitnamilegacy/minio\n        global:\n          security:\n            allowInsecureImages: true\n"
+	tests := []struct {
+		name  string
+		path  string
+		input string
+		want  []helmfileWant
+	}{
+		{
+			// The image of the values and the image guard are reported.
+			name:  "yaml inline values",
+			path:  "helmfile.yaml",
+			input: release + values,
+			want: []helmfileWant{
+				{"DSD-IMG-001", 6, 23, "minio", "high", "confirmed", "docker.io/bitnamilegacy/minio", "bitnamilegacy/minio"},
+				{"DSD-CFG-001", 9, 34, "", "unknown", "confirmed", "true", "true"},
+			},
+		},
+		{
+			name:  "gotmpl inline values",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + values,
+			want: []helmfileWant{
+				{"DSD-IMG-001", 6, 23, "minio", "high", "confirmed", "docker.io/bitnamilegacy/minio", "bitnamilegacy/minio"},
+				{"DSD-CFG-001", 9, 34, "", "unknown", "confirmed", "true", "true"},
+			},
+		},
+		{
+			// A values entry written as a block scalar is a values
+			// document: the rules of a values document apply, and the
+			// columns are the ones of the file, not the ones of the
+			// dedented content.
+			name:  "yaml values entry as a block scalar",
+			path:  "helmfile.yaml",
+			input: release + "      - |\n        image:\n          repository: bitnamilegacy/minio\n        global:\n          security:\n            allowInsecureImages: true\n",
+			want: []helmfileWant{
+				{"DSD-IMG-001", 7, 23, "minio", "high", "confirmed", "docker.io/bitnamilegacy/minio", "bitnamilegacy/minio"},
+				{"DSD-CFG-001", 10, 34, "", "unknown", "confirmed", "true", "true"},
+			},
+		},
+		{
+			// The same content in a gotmpl file: the file is read line by
+			// line, so the positions are the ones of the file.
+			name:  "gotmpl values entry as a block scalar",
+			path:  "helmfile.yaml.gotmpl",
+			input: release + "      - |\n        image:\n          repository: bitnamilegacy/minio\n        global:\n          security:\n            allowInsecureImages: true\n",
+			want: []helmfileWant{
+				{"DSD-IMG-001", 7, 23, "minio", "high", "confirmed", "docker.io/bitnamilegacy/minio", "bitnamilegacy/minio"},
+				{"DSD-CFG-001", 10, 34, "", "unknown", "confirmed", "true", "true"},
+			},
+		},
+		{
+			// A values entry that names a file is not a values document.
+			name:  "yaml values entry that names a file",
+			path:  "helmfile.yaml",
+			input: release + "      - values/minio.yaml\n",
+			want:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := helmfileScan(tt.path, tt.input)
+			assertHelmfileFindings(t, source, got, tt.want)
+		})
+	}
+}
+
 // helmfileFixtureDir is the directory of the real Helmfile fixtures, relative
 // to the directory of this package.
 const helmfileFixtureDir = "../../testdata/repos/helmfile"
