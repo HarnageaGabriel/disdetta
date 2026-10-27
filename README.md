@@ -69,6 +69,7 @@ means a usage or fatal error, 3 means the scan was incomplete. Rules and codes:
 [docs/diagnostics](docs/diagnostics/README.md); contract: [docs/spec/v0.1.md](docs/spec/v0.1.md). `--format json` gives a stable, versioned document for CI; `--format sarif` gives code-scanning output.
 
 GitHub Action: [docs/usage/github-action.md](docs/usage/github-action.md) runs the same scan in a workflow and gates a pull request on it.
+CI guide: [docs/usage/ci.md](docs/usage/ci.md) says what to gate on, how to run the scan in GitHub Actions, GitLab CI, Azure Pipelines and Jenkins, and how to read the report.
 
 ## Why
 

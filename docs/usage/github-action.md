@@ -272,3 +272,7 @@ and only on a machine that cannot create one: Git Bash for Windows copies
 the file instead of linking it. A failed output is checked with
 `/dev/full` when the machine has that device, and with a `printf` that
 fails on the answer of the function on every machine.
+
+## Related pages
+
+- [Using disdetta in CI](ci.md)
