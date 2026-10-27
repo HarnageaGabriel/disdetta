@@ -4,6 +4,7 @@
 
 - Repository scan: rules, sources, and ignore-file support.
 - Cluster scan: tiered analysis with opt-in Helm Secret reads.
+- Cluster scan hardening: bounded response bodies, no transparent decompression, no redirects, one total time budget, and an opt-in refusal of kubeconfig credential plugins.
 - PostgreSQL migration plan: partial support.
 - Corpus of repository and cluster fixtures for coverage.
 - Helmfile: repositories and releases of `helmfile.yaml`, `helmfile.d/` and `*.yaml.gotmpl`.

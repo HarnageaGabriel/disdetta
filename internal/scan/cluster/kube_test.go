@@ -2,8 +2,17 @@ package cluster
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	goruntime "runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -301,12 +310,15 @@ func TestClientSourceReleaseSecretFilters(t *testing.T) {
 	}
 }
 
-// TestClientSourceListTimeoutBoundsWholeList checks review 03 m8: the timeout
-// bounds the whole paginated list, so a server that keeps returning a
-// continuation token cannot extend the read page after page.
+// TestClientSourceListTimeoutBoundsWholeList checks that a list stops as soon
+// as the context that carries the scan budget ends, so a server that keeps
+// returning a continuation token cannot extend the read page after page
+// (spec v0.2 section 4, adversarial audit F2).
 func TestClientSourceListTimeoutBoundsWholeList(t *testing.T) {
 	source, client := newSource(t)
-	source.timeout = 150 * time.Millisecond
+	source.timeout = time.Minute
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
 	calls := 0
 	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
 		calls++
@@ -314,13 +326,16 @@ func TestClientSourceListTimeoutBoundsWholeList(t *testing.T) {
 		return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "next"}}, nil
 	})
 	start := time.Now()
-	_, failures := source.ListWorkloads(context.Background(), []string{"db"})
+	_, failures := source.ListWorkloads(ctx, []string{"db"})
 	elapsed := time.Since(start)
 	if calls == 0 || calls > 20 || elapsed > 5*time.Second {
-		t.Fatalf("review 03 m8: paging did not stop on the whole-list timeout: calls=%d elapsed=%s", calls, elapsed)
+		t.Fatalf("audit F2: paging did not stop on the scan budget: calls=%d elapsed=%s", calls, elapsed)
 	}
 	if len(failures) != 1 || failures[0].Forbidden || failures[0].Resource != "pods" || failures[0].Tier != 1 {
-		t.Fatalf("review 03 m8: failures %#v", failures)
+		t.Fatalf("audit F2: failures %#v", failures)
+	}
+	if !failures[0].Deadline {
+		t.Fatalf("audit F2: the budget failure is not marked: %#v", failures[0])
 	}
 }
 
@@ -343,5 +358,331 @@ func TestClientSourceListStopsOnCancellation(t *testing.T) {
 	}
 	if len(failures) != 1 || failures[0].Resource != "pods" {
 		t.Fatalf("review 03 m8: failures %#v", failures)
+	}
+}
+
+// writeKubeconfig writes a kubeconfig that points at server and returns its
+// path, so a test drives the real client-go client against a local server.
+func writeKubeconfig(t *testing.T, server string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster:
+    server: %s
+    insecure-skip-tls-verify: true
+contexts:
+- name: test
+  context:
+    cluster: test
+    user: test
+current-context: test
+users:
+- name: test
+  user:
+    token: test-token
+`, server)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// newHTTPSource builds a ClientSource over a kubeconfig that points at server.
+func newHTTPSource(t *testing.T, server string) *ClientSource {
+	t.Helper()
+	source, err := NewClientSource(Options{Kubeconfig: writeKubeconfig(t, server)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := source.(*ClientSource)
+	if !ok {
+		t.Fatalf("unexpected source %T", source)
+	}
+	return client
+}
+
+// TestClientSourceRefusesGzipBomb checks adversarial audit F1: the response is
+// never transparently decompressed and every body is read through a hard
+// limit, so a compressed body that expands to hundreds of megabytes cannot
+// make the scan allocate it. The bomb must fail fast with a small memory
+// growth.
+func TestClientSourceRefusesGzipBomb(t *testing.T) {
+	bomb := gzipBomb(t, 320<<20)
+	var askedForCompression bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			askedForCompression = true
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bomb)
+	}))
+	defer server.Close()
+
+	source := newHTTPSource(t, server.URL)
+	var before, after goruntime.MemStats
+	goruntime.GC()
+	goruntime.ReadMemStats(&before)
+	start := time.Now()
+	_, failures := source.ListWorkloads(context.Background(), []string{"db"})
+	elapsed := time.Since(start)
+	goruntime.ReadMemStats(&after)
+
+	if askedForCompression {
+		t.Fatal("audit F1: the client asked the server for a compressed answer")
+	}
+	if len(failures) == 0 {
+		t.Fatalf("audit F1: the gzip bomb was accepted: %#v", failures)
+	}
+	if elapsed > 30*time.Second {
+		t.Fatalf("audit F1: the gzip bomb was not refused fast: %s", elapsed)
+	}
+	growth := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+	if growth > 256<<20 {
+		t.Fatalf("audit F1: the gzip bomb allocated %d bytes", growth)
+	}
+}
+
+// gzipBomb returns a gzip stream that expands to size bytes of zeros.
+func gzipBomb(t *testing.T, size int) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	writer := gzip.NewWriter(&out)
+	chunk := make([]byte, 1<<20)
+	for written := 0; written < size; written += len(chunk) {
+		if _, err := writer.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+// TestClientSourceRefusesOversizedBody checks adversarial audit F1: a list
+// response over MaxListResponseBytes fails with a diagnostic that names the
+// limit and never carries the body.
+func TestClientSourceRefusesOversizedBody(t *testing.T) {
+	const size = 200 << 20
+	marker := "PLANTED-body-content"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		block := bytes.Repeat([]byte("A"), 1<<20)
+		for written := 0; written < size; written += len(block) {
+			if _, err := w.Write(block); err != nil {
+				return
+			}
+		}
+		_, _ = io.WriteString(w, marker)
+	}))
+	defer server.Close()
+
+	source := newHTTPSource(t, server.URL)
+	_, failures := source.ListWorkloads(context.Background(), []string{"db"})
+	if len(failures) == 0 {
+		t.Fatalf("audit F1: the oversized body was accepted")
+	}
+	found := false
+	for _, f := range failures {
+		if !strings.Contains(f.Detail, "MaxListResponseBytes") {
+			t.Errorf("audit F1: the diagnostic does not name the limit: %#v", f)
+			continue
+		}
+		if strings.Contains(f.Detail, marker) {
+			t.Errorf("audit F1: the diagnostic carries the body: %q", f.Detail)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("audit F1: no failure names the limit: %#v", failures)
+	}
+}
+
+// TestClientSourceStopsAtPageCap checks adversarial audit F1: a server that
+// always answers with a continuation token stops at MaxPagesPerList with a
+// DSD-SCN-005 diagnostic.
+func TestClientSourceStopsAtPageCap(t *testing.T) {
+	source, client := newSource(t)
+	source.timeout = time.Minute
+	calls := 0
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "next"}}, nil
+	})
+	_, failures := source.ListWorkloads(context.Background(), []string{"db"})
+	if calls != MaxPagesPerList {
+		t.Fatalf("audit F1: the page cap did not stop the list: calls=%d", calls)
+	}
+	if len(failures) != 1 || failures[0].Code != "DSD-SCN-005" || failures[0].Resource != "pods" {
+		t.Fatalf("audit F1: failures %#v", failures)
+	}
+	if !strings.Contains(failures[0].Detail, "MaxPagesPerList") {
+		t.Errorf("audit F1: the diagnostic does not name the limit: %#v", failures[0])
+	}
+}
+
+// TestClientSourceStopsAtItemCap checks adversarial audit F1: a page with more
+// items than MaxItemsPerList stops the list with a DSD-SCN-005 diagnostic and
+// keeps at most the cap.
+func TestClientSourceStopsAtItemCap(t *testing.T) {
+	source, client := newSource(t)
+	source.timeout = time.Minute
+	items := make([]corev1.Pod, 0, 200000)
+	for i := 0; i < 200000; i++ {
+		items = append(items, corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("p%d", i), Namespace: "db"}})
+	}
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &corev1.PodList{Items: items}, nil
+	})
+	workloads, failures := source.ListWorkloads(context.Background(), []string{"db"})
+	if len(workloads.Pods) != MaxItemsPerList {
+		t.Fatalf("audit F1: the item cap did not bound the list: %d pods", len(workloads.Pods))
+	}
+	if len(failures) != 1 || failures[0].Code != "DSD-SCN-005" || failures[0].Resource != "pods" {
+		t.Fatalf("audit F1: failures %#v", failures)
+	}
+	if !strings.Contains(failures[0].Detail, "MaxItemsPerList") {
+		t.Errorf("audit F1: the diagnostic does not name the limit: %#v", failures[0])
+	}
+}
+
+// TestClientSourceRefusesRedirect checks adversarial audit F4: a redirect
+// answer is never followed, so the bearer token never reaches the target, and
+// the diagnostic names the status and not the Location.
+func TestClientSourceRefusesRedirect(t *testing.T) {
+	var targetRequests int
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetRequests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"kind":"PodList","apiVersion":"v1","items":[]}`)
+	}))
+	defer target.Close()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/steal", http.StatusFound)
+	}))
+	defer server.Close()
+
+	source := newHTTPSource(t, server.URL)
+	_, failures := source.ListWorkloads(context.Background(), []string{"db"})
+	if targetRequests != 0 {
+		t.Fatalf("audit F4: the redirect was followed: %d requests", targetRequests)
+	}
+	if len(failures) == 0 {
+		t.Fatalf("audit F4: the redirect was accepted")
+	}
+	found := false
+	for _, f := range failures {
+		if strings.Contains(f.Detail, "302") {
+			found = true
+		}
+		if strings.Contains(f.Detail, target.URL) {
+			t.Errorf("audit F4: the diagnostic carries the Location: %q", f.Detail)
+		}
+	}
+	if !found {
+		t.Fatalf("audit F4: no failure names the redirect status: %#v", failures)
+	}
+}
+
+// writeExecKubeconfig writes a kubeconfig whose user runs a credential plugin
+// that writes marker, and returns its path.
+func writeExecKubeconfig(t *testing.T, marker, server string) string {
+	t.Helper()
+	binary, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster:
+    server: %s
+    insecure-skip-tls-verify: true
+contexts:
+- name: test
+  context:
+    cluster: test
+    user: test
+current-context: test
+users:
+- name: test
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: %q
+      interactiveMode: Never
+      args:
+      - "-test.run=TestExecPluginMarker"
+      - "-test.paniconexit0=false"
+      env:
+      - name: DISDETTA_EXEC_MARKER
+        value: %q
+`, server, binary, marker)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestExecPluginMarker is the credential plugin the exec plugin tests run: it
+// writes the marker file and prints the credential the plugin protocol expects.
+// The plugin runs the test binary with -test.paniconexit0=false, so the
+// process ends with the credential as its only output.
+func TestExecPluginMarker(t *testing.T) {
+	marker := os.Getenv("DISDETTA_EXEC_MARKER")
+	if marker == "" {
+		t.Skip("not run as the credential plugin")
+	}
+	if err := os.WriteFile(marker, []byte("executed"), 0o600); err != nil {
+		os.Exit(1)
+	}
+	fmt.Print(`{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","status":{"token":"plugin-token"}}`)
+	os.Exit(0)
+}
+
+// TestClientSourceRefusesExecPlugins checks adversarial audit F3: a
+// kubeconfig whose user runs a credential plugin is refused before the plugin
+// runs, so no program of a hostile kubeconfig ever executes.
+func TestClientSourceRefusesExecPlugins(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "marker")
+	kubeconfig := writeExecKubeconfig(t, marker, "https://127.0.0.1:1/")
+	_, err := NewClientSource(Options{Kubeconfig: kubeconfig, DenyExecPlugins: true})
+	if err == nil {
+		t.Fatal("audit F3: the exec plugin kubeconfig was accepted")
+	}
+	if !strings.Contains(err.Error(), "exec credential plugin") {
+		t.Fatalf("audit F3: unclear message: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("audit F3: the credential plugin ran: %v", err)
+	}
+}
+
+// TestClientSourceRunsExecPluginWithoutTheFlag is the control of the exec
+// plugin test: without --deny-exec-plugins client-go runs the plugin, so the
+// marker appears. It proves the refusal test is not vacuous.
+func TestClientSourceRunsExecPluginWithoutTheFlag(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "marker")
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"kind":"PodList","apiVersion":"v1","items":[]}`)
+	}))
+	defer server.Close()
+	kubeconfig := writeExecKubeconfig(t, marker, server.URL)
+	source, err := NewClientSource(Options{Kubeconfig: kubeconfig})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, failures := source.ListWorkloads(context.Background(), []string{"db"}); len(failures) != 0 {
+		t.Fatalf("audit F3: the plugin did not authenticate: %#v", failures)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("audit F3: the credential plugin did not run: %v", err)
 	}
 }

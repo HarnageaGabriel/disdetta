@@ -26,6 +26,44 @@ func TestExitCodeMatrix(t *testing.T) {
 		})
 	}
 }
+
+// audit F3: --deny-exec-plugins refuses a kubeconfig whose user runs a
+// credential plugin, with a usage error (exit code 2) before the plugin runs.
+func TestClusterDenyExecPlugins(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	content := `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster:
+    server: https://127.0.0.1:1/
+contexts:
+- name: test
+  context:
+    cluster: test
+    user: test
+current-context: test
+users:
+- name: test
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: "disdetta-marker"
+      interactiveMode: Never
+`
+	if err := os.WriteFile(kubeconfig, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, err bytes.Buffer
+	code := Execute(context.Background(), []string{"scan", "--cluster", "--kubeconfig", kubeconfig, "--deny-exec-plugins"}, IO{Out: &out, Err: &err})
+	if code != ExitError {
+		t.Fatalf("audit F3: got %d want %d stderr %s", code, ExitError, err.String())
+	}
+	if !strings.Contains(err.String(), "exec credential plugin") {
+		t.Errorf("audit F3: unclear message: %s", err.String())
+	}
+}
+
 func TestRuleFilter(t *testing.T) {
 	path := write(t, "image: bitnami/redis:7\nother:\n  image: bitnami/nginx:latest\n")
 	var out, err bytes.Buffer

@@ -2,6 +2,7 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
@@ -156,9 +157,57 @@ func SARIF(w io.Writer, r diag.Report) error {
 			Results: results,
 		}},
 	}
-	enc := json.NewEncoder(w)
+	return writeJSON(w, doc)
+}
+
+// writeJSON encodes v as indented JSON, escapes the characters that must not
+// survive raw in a machine-readable output and writes it to w (spec section 6,
+// adversarial audit F5).
+func writeJSON(w io.Writer, v any) error {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
-	return enc.Encode(doc)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	_, err := w.Write(escapeFormatChars(buf.Bytes()))
+	return err
+}
+
+// escapeFormatChars rewrites every character that SafeText escapes in the
+// table, except the control characters encoding/json already escapes, as a
+// JSON \uXXXX escape. The rewrite is lossless: a JSON parser decodes the
+// escape back to the original character, and no raw bidi override, zero-width
+// character or line separator survives in the output.
+func escapeFormatChars(data []byte) []byte {
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); {
+		r, size := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && size == 1 {
+			out = append(out, data[i])
+			i++
+			continue
+		}
+		if needsJSONEscape(r) {
+			out = append(out, fmt.Sprintf(`\u%04x`, r)...)
+		} else {
+			out = append(out, data[i:i+size]...)
+		}
+		i += size
+	}
+	return out
+}
+
+// needsJSONEscape reports whether a character must be written as a JSON
+// escape: the Unicode format characters (category Cf), such as the bidi
+// overrides U+202A-U+202E and the isolates U+2066-U+2069, and the line
+// separators U+2028 and U+2029. The control characters are already escaped by
+// the encoder.
+func needsJSONEscape(r rune) bool {
+	if r == '\u2028' || r == '\u2029' {
+		return true
+	}
+	return unicode.In(r, unicode.Cf)
 }
 
 // RulesTable writes the registry as a deterministic text table.
@@ -208,9 +257,7 @@ func RulesJSON(w io.Writer) error {
 		}
 		out.Rules = append(out.Rules, ruleJSON{Code: e.Code, Kind: e.Kind(), Severity: severity, Level: level, Title: e.Title, OneLiner: e.OneLiner, Docs: e.DocURL()})
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return writeJSON(w, out)
 }
 
 // JSON writes the schema-version-1 envelope with stable struct field order.
@@ -234,9 +281,7 @@ func JSON(w io.Writer, r diag.Report) error {
 	if v.Diagnostics == nil {
 		v.Diagnostics = []diag.Diagnostic{}
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	return writeJSON(w, v)
 }
 func location(v diag.Location) string {
 	if v.Line == 0 {
