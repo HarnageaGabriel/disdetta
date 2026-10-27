@@ -1111,13 +1111,15 @@ func TestHelmfileInlineValuesRules(t *testing.T) {
 		},
 		{
 			// A values entry written as a block scalar is a values
-			// document: the rules of a values document apply.
+			// document: the rules of a values document apply, and the
+			// columns are the ones of the file, not the ones of the
+			// dedented content.
 			name:  "yaml values entry as a block scalar",
 			path:  "helmfile.yaml",
 			input: release + "      - |\n        image:\n          repository: bitnamilegacy/minio\n        global:\n          security:\n            allowInsecureImages: true\n",
 			want: []helmfileWant{
-				{"DSD-IMG-001", 7, 15, "minio", "high", "confirmed", "docker.io/bitnamilegacy/minio", "bitnamilegacy/minio"},
-				{"DSD-CFG-001", 10, 26, "", "unknown", "confirmed", "true", "true"},
+				{"DSD-IMG-001", 7, 23, "minio", "high", "confirmed", "docker.io/bitnamilegacy/minio", "bitnamilegacy/minio"},
+				{"DSD-CFG-001", 10, 34, "", "unknown", "confirmed", "true", "true"},
 			},
 		},
 		{

@@ -84,10 +84,53 @@ func (s *walkState) scanHelmfile(root *yaml.Node) {
 		if chart := nodeAt(release, "chart"); chart != nil && chart.Kind == yaml.ScalarNode {
 			s.addHelmfileRelease(file, chart.Value, chart.Line, chart.Column)
 		}
+		start := len(s.out.Findings)
 		s.scanHelmfileValues(nodeAt(release, "values"))
+		middle := len(s.out.Findings)
 		s.scanHelmfileSets(release)
+		s.dropOverriddenHelmfileValues(start, middle)
 	}
 	file.resolve(s)
+}
+
+// dropOverriddenHelmfileValues drops the findings of the inline values of a
+// release that a set or setString entry of the same release repeats: the set
+// entries override the inline values, so one effective image is one finding,
+// reported at the overriding set value. The findings in [start, middle) come
+// from the inline values and the findings from middle on come from the set
+// entries (spec section 9).
+func (s *walkState) dropOverriddenHelmfileValues(start, middle int) {
+	if middle <= start || middle >= len(s.out.Findings) {
+		return
+	}
+	overriding := map[string]bool{}
+	for _, f := range s.out.Findings[middle:] {
+		if helmfileEffectiveRule(f.RuleID) {
+			overriding[f.RuleID+"\x00"+f.Reference] = true
+		}
+	}
+	if len(overriding) == 0 {
+		return
+	}
+	kept := s.out.Findings[:start]
+	for i := start; i < len(s.out.Findings); i++ {
+		f := s.out.Findings[i]
+		if i < middle && helmfileEffectiveRule(f.RuleID) && overriding[f.RuleID+"\x00"+f.Reference] {
+			if s.file != nil {
+				// The whole-scalar fallback must not report it again.
+				s.file.fallbackSeen[fallbackKey(f)] = true
+			}
+			continue
+		}
+		kept = append(kept, f)
+	}
+	s.out.Findings = kept
+}
+
+// helmfileEffectiveRule reports whether a rule describes the effective image
+// of a release: the image rules and the image guard.
+func helmfileEffectiveRule(rule string) bool {
+	return strings.HasPrefix(rule, "DSD-IMG-") || rule == "DSD-CFG-001"
 }
 
 // addHelmfileRepository records one `repositories:` entry of a YAML document.
@@ -426,8 +469,18 @@ func (s *walkState) scanHelmfileEmbeddedValues(entry *yaml.Node) {
 		return
 	}
 	base := embeddedLineOffset(entry)
+	start := len(s.out.Findings)
 	s.scanImagesAt(root, false, base, map[*yaml.Node]bool{}, new(int))
 	s.scanHelmfileEmbeddedConfig(root, base, 0)
+	if entry.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 && s.data != nil {
+		// A block scalar loses the indentation of its content: the columns of
+		// the embedded document are shifted back to the columns of the file.
+		// Other scalar styles keep the columns of the embedded document.
+		shift := blockContentIndent(s.data, entry.Line)
+		for i := start; i < len(s.out.Findings); i++ {
+			s.out.Findings[i].Location.Column += shift
+		}
+	}
 }
 
 // scanHelmfileEmbeddedConfig reports DSD-CFG-001 in a values document written
@@ -485,6 +538,15 @@ func (s *walkState) scanHelmfileSets(release *yaml.Node) {
 		for _, entry := range sequenceAt(release, key) {
 			name := nodeAt(entry, "name")
 			value := nodeAt(entry, "value")
+			if value != nil && value.Kind == yaml.ScalarNode {
+				// The value of any set entry is handled here: the
+				// whole-scalar fallback never reports its image part, so
+				// `nameOverride: bitnami/redis` is not an image.
+				if s.helmfileSetNodes == nil {
+					s.helmfileSetNodes = map[*yaml.Node]bool{}
+				}
+				s.helmfileSetNodes[value] = true
+			}
 			if name == nil || value == nil || name.Kind != yaml.ScalarNode || value.Kind != yaml.ScalarNode {
 				// An entry with a file, or without a name or a value, sets
 				// no image: it is ignored.
@@ -685,6 +747,7 @@ func (s *walkState) scanHelmfileTemplate(data []byte) {
 	// The set entries of the current release and the values block it is in.
 	sets := helmfileSetScan{}
 	valuesBlock := false
+	valuesPath := helmfileValuesPath{itemIndent: -1}
 	for scanner.Scan() {
 		line++
 		text := scanner.Text()
@@ -697,14 +760,15 @@ func (s *walkState) scanHelmfileTemplate(data []byte) {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
+		if isHelmfileTemplateAction(trimmed) {
+			// A pure template action is not a key, at any indentation: the
+			// section, the release, the set block and the values block of the
+			// file all stay.
+			continue
+		}
 		indent := helmfileIndent(text)
 		if indent == 0 && !strings.HasPrefix(trimmed, "- ") {
-			// A top-level key or a template action.
-			if isHelmfileTemplateAction(trimmed) {
-				// A pure template action is not a key: the section of the
-				// file stays (review finding 4).
-				continue
-			}
+			// A top-level key.
 			if section == "repositories" {
 				recordCurrent()
 			}
@@ -813,10 +877,11 @@ func (s *walkState) scanHelmfileTemplate(data []byte) {
 				valuesBlock = false
 			}
 			if !property {
-				// A key of the values block of the release: the image
-				// guard is reported where it is switched off.
-				if valuesBlock && key == "allowInsecureImages" && helmfileBoolValue(value) {
-					s.addHelmfileConfig(line, helmfileValueColumn(text, value))
+				// A line of the values block of the release: the image
+				// guard is reported where it is switched off, under
+				// global.security only (spec section 2.1).
+				if valuesBlock {
+					s.scanHelmfileValuesLine(&valuesPath, text, trimmed, indent, line)
 				}
 				break
 			}
@@ -830,6 +895,9 @@ func (s *walkState) scanHelmfileTemplate(data []byte) {
 				valuesBlock = false
 			case "values":
 				valuesBlock = true
+				valuesPath.reset()
+				// A flow value written on the line of the key.
+				s.scanHelmfileFlowGuard(text, value, "", "", line)
 			case "set", "setString":
 				// A set block of the release: its entries are read until
 				// the block ends.
@@ -991,7 +1059,7 @@ func (s *helmfileSetScan) setName(text, trimmed string) {
 	if !ok || key != "name" {
 		return
 	}
-	s.name = strings.TrimSpace(value)
+	s.name = templateScalar(strings.TrimSpace(value))
 	s.value = ""
 	s.valueLine = 0
 }
@@ -1001,7 +1069,7 @@ func (s *helmfileSetScan) setName(text, trimmed string) {
 func (s *helmfileSetScan) setProperty(text, key, value string, line int) {
 	switch key {
 	case "name":
-		s.name = strings.TrimSpace(value)
+		s.name = templateScalar(strings.TrimSpace(value))
 		s.value = ""
 		s.valueLine = 0
 	case "value":
@@ -1047,11 +1115,137 @@ func helmfileBoolValue(raw string) bool {
 	return strings.EqualFold(templateScalar(raw), "true")
 }
 
+// helmfileValuesKey is a key of the values block of a release that has a
+// mapping below it.
+type helmfileValuesKey struct {
+	indent int
+	name   string
+}
+
+// helmfileValuesPath follows the mapping keys that enclose the line of the
+// values block of a release in a gotmpl file. The path is relative to the
+// values document: a list item of the block starts a new document.
+type helmfileValuesPath struct {
+	keys []helmfileValuesKey
+	// itemIndent is the indent of the first list item of the block.
+	itemIndent int
+}
+
+// reset forgets the keys and the list items of the block.
+func (p *helmfileValuesPath) reset() {
+	p.keys = p.keys[:0]
+	p.itemIndent = -1
+}
+
+// scanHelmfileValuesLine reads one line of the values block of a release. The
+// image guard is reported where `allowInsecureImages` is switched on under
+// `global.security` of a values document, whatever the style of the document
+// (spec section 2.1).
+func (s *walkState) scanHelmfileValuesLine(path *helmfileValuesPath, text, trimmed string, indent, line int) {
+	content := trimmed
+	effective := indent
+	if strings.HasPrefix(trimmed, "- ") {
+		if path.itemIndent < 0 {
+			path.itemIndent = indent
+		}
+		if indent <= path.itemIndent {
+			// A list item of the block is a new values document.
+			path.keys = path.keys[:0]
+		}
+		content = strings.TrimLeft(trimmed[1:], " \t")
+		effective = indent + len(trimmed) - len(content)
+		if content != "" && (content[0] == '{' || content[0] == '[') {
+			if len(path.keys) == 0 {
+				s.scanHelmfileFlowGuard(text, content, "", "", line)
+			}
+			return
+		}
+	}
+	key, value, ok := helmfileKey(content)
+	if !ok {
+		return
+	}
+	key = templateScalar(key)
+	for n := len(path.keys); n > 0 && path.keys[n-1].indent >= effective; n-- {
+		path.keys = path.keys[:n-1]
+	}
+	switch {
+	case value == "":
+		path.keys = append(path.keys, helmfileValuesKey{indent: effective, name: key})
+	case value[0] == '{' || value[0] == '[':
+		// A flow value of a key: the enclosing keys are written back around
+		// the fragment so that its path is the path of the document.
+		prefix, suffix := "", ""
+		for _, k := range path.keys {
+			prefix += "{" + k.name + ": "
+			suffix += "}"
+		}
+		prefix += "{" + key + ": "
+		suffix += "}"
+		s.scanHelmfileFlowGuard(text, value, prefix, suffix, line)
+	case key == "allowInsecureImages" && len(path.keys) == 2 &&
+		path.keys[0].name == "global" && path.keys[1].name == "security" && helmfileBoolValue(value):
+		s.addHelmfileConfig(line, helmfileValueColumn(text, value))
+	}
+}
+
+// maxHelmfileFlowFragment is the largest flow fragment of a gotmpl line that
+// is parsed; a longer one is skipped without a finding.
+const maxHelmfileFlowFragment = 64 * 1024
+
+// scanHelmfileFlowGuard reports DSD-CFG-001 for a flow collection written on
+// one line of the values block of a release, such as
+// `[{global: {security: {allowInsecureImages: true}}}]`. The prefix and the
+// suffix put the keys that enclose the fragment around it. A fragment with a
+// template action is skipped: it is not YAML (spec section 9.1).
+func (s *walkState) scanHelmfileFlowGuard(text, fragment, prefix, suffix string, line int) {
+	fragment = strings.TrimSpace(fragment)
+	if fragment == "" || len(fragment) > maxHelmfileFlowFragment || (fragment[0] != '{' && fragment[0] != '[') {
+		return
+	}
+	if strings.Contains(prefix+fragment, "{{") || strings.Contains(fragment, "}}") && strings.Contains(fragment, "{{") {
+		return
+	}
+	start := strings.Index(text, fragment)
+	if start < 0 {
+		return
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(prefix+fragment+suffix), &doc); err != nil || len(doc.Content) == 0 {
+		return
+	}
+	root := doc.Content[0]
+	if GuardYAML(root) != nil {
+		return
+	}
+	roots := []*yaml.Node{root}
+	if root.Kind == yaml.SequenceNode {
+		roots = root.Content
+	}
+	for _, r := range roots {
+		if r != nil && r.Kind == yaml.AliasNode {
+			r = r.Alias
+		}
+		if r == nil || r.Kind != yaml.MappingNode || isSecretMapping(r) {
+			continue
+		}
+		v := nodeAt(r, "global", "security", "allowInsecureImages")
+		if v == nil || v.Tag != "!!bool" {
+			continue
+		}
+		var enabled bool
+		if v.Decode(&enabled) == nil && enabled {
+			s.addHelmfileConfig(line, start+v.Column-len(prefix))
+		}
+	}
+}
+
 // isHelmfileTemplateAction reports whether a line holds only a Go template
 // action. Such a line is not a YAML key: it never ends the section of a
 // Helmfile (review finding 4).
 func isHelmfileTemplateAction(trimmed string) bool {
-	return strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}")
+	return strings.HasPrefix(trimmed, "{{") && strings.HasSuffix(trimmed, "}}") &&
+		strings.Count(trimmed, "{{") == 1 && strings.Count(trimmed, "}}") == 1
 }
 
 func (s *walkState) scanHelmfileTemplateLine(text string, line int) {
