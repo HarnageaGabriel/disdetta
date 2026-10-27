@@ -18,6 +18,7 @@ The `Signed-off-by` line certifies the contribution under the
 ## Governance
 
 Roles, decisions, and releases are described in [docs/governance.md](docs/governance.md).
+The release procedure is in [docs/releasing.md](docs/releasing.md).
 
 ## Development
 

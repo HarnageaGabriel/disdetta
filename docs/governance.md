@@ -70,7 +70,7 @@ Only maintainers tag releases. A release tag matches `v*.*.*`, for example
 and a published tag is not moved or deleted.
 
 The release pipeline runs on the tag and publishes the release artifacts. The
-changes of each release are listed in [CHANGELOG.md](../CHANGELOG.md).
+changes of each release are listed in [CHANGELOG.md](../CHANGELOG.md). See the [release runbook](releasing.md) for the maintainer procedure.
 
 ## Security reports
 
