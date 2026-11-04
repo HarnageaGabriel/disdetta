@@ -105,3 +105,35 @@ subjects:
 
 With only namespaced bindings, list of a namespace outside the grant fails and
 the scan reports `DSD-SCN-010` for it and continues (spec v0.2 sections 4 and 5).
+
+## Risk: the kubeconfig runs a credential plugin
+
+The RBAC above says what the identity may read. The kubeconfig says how the
+identity authenticates, and that part is not covered by RBAC: when the
+selected user has an `exec` provider, client-go **runs the command of the
+kubeconfig** to get a token, and an `auth-provider` runs an external plugin
+the same way. A kubeconfig that comes from an untrusted place (a repository, a
+ticket, a chat message) therefore runs a program on the machine of the scan,
+with the rights of the user who started it.
+
+Mitigations:
+
+- **Use only kubeconfigs you trust**, and prefer one that carries a token or
+  a client certificate over one that carries a plugin.
+- **`--deny-exec-plugins` refuses such a kubeconfig**: the scan exits with the
+  usage error code 2, with a message that names the user and the plugin,
+  before any plugin runs. Use it for the runs that do not need a plugin, such
+  as a scan in CI with a kubeconfig that carries a service-account token.
+- The refusal is opt-in: the cloud kubeconfigs (EKS, GKE, AKS) need their
+  `exec` plugin, so the default is unchanged (threat model T13).
+
+## Risk: proxies receive cluster credentials
+
+The Kubernetes client honors `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` from
+the environment, plus `proxy-url` on the selected kubeconfig cluster. Set
+`NO_PROXY` when the API server must be reached directly. Only use a proxy you
+trust: a TLS-inspection proxy terminates TLS and can see the bearer token.
+
+Disdetta refuses bearer or basic credentials for a plain `http://` API server
+on a non-loopback host (usage error, exit 2). Plain HTTP remains available for
+local development servers at `127.0.0.1`, `::1` and `localhost`.

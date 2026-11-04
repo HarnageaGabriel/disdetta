@@ -70,7 +70,7 @@ func newScanCmd(streams IO) *cobra.Command {
 	var rules, exclude, namespaces []string
 	var clusterScan bool
 	var contextName, kubeconfig string
-	var readHelmSecrets bool
+	var readHelmSecrets, denyExecPlugins bool
 	var timeout time.Duration
 	cmd := &cobra.Command{Use: "scan [path]", Short: "Find Bitnami references in a repository or a cluster", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if format != "table" && format != "json" && format != "sarif" {
@@ -96,7 +96,7 @@ func newScanCmd(streams IO) *cobra.Command {
 		var result diag.Report
 		var scanErr error
 		if clusterScan {
-			options := cluster.Options{Context: contextName, Kubeconfig: kubeconfig, Namespaces: namespaces, ReadHelmSecrets: readHelmSecrets, Timeout: timeout}
+			options := cluster.Options{Context: contextName, Kubeconfig: kubeconfig, Namespaces: namespaces, ReadHelmSecrets: readHelmSecrets, Timeout: timeout, DenyExecPlugins: denyExecPlugins}
 			source, err := cluster.NewClientSource(options)
 			if err != nil {
 				return &exitError{ExitError, err}
@@ -136,13 +136,8 @@ func newScanCmd(streams IO) *cobra.Command {
 		if scanErr != nil {
 			return &exitError{ExitError, fmt.Errorf("write report: %w", scanErr)}
 		}
-		for _, f := range result.Findings {
-			if threshold >= 0 && diag.SeverityRank(f.Severity) <= threshold {
-				return &exitError{code: ExitFindings}
-			}
-		}
-		if !result.Summary.Complete {
-			return &exitError{code: ExitIncomplete}
+		if code := reportExitCode(result, threshold); code != ExitOK {
+			return &exitError{code: code}
 		}
 		return nil
 	}}
@@ -156,8 +151,23 @@ func newScanCmd(streams IO) *cobra.Command {
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file to use with --cluster (default kubectl resolution)")
 	cmd.Flags().StringArrayVar(&namespaces, "namespace", nil, "namespace to scan with --cluster (repeatable; default all namespaces)")
 	cmd.Flags().BoolVar(&readHelmSecrets, "read-helm-secrets", false, "read Helm release Secrets for tier 3 (may contain credentials)")
-	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "per-list timeout for --cluster (e.g. 30s)")
+	cmd.Flags().BoolVar(&denyExecPlugins, "deny-exec-plugins", false, "refuse a --cluster kubeconfig whose user runs a credential plugin (exec or auth provider)")
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "total time budget of the --cluster scan (e.g. 30s)")
 	return cmd
+}
+
+// reportExitCode preserves the v0.1 precedence: a finding-policy failure wins
+// over incompleteness; otherwise an incomplete scan exits 3.
+func reportExitCode(result diag.Report, threshold int) int {
+	for _, f := range result.Findings {
+		if threshold >= 0 && diag.SeverityRank(f.Severity) <= threshold {
+			return ExitFindings
+		}
+	}
+	if !result.Summary.Complete {
+		return ExitIncomplete
+	}
+	return ExitOK
 }
 func newRulesCmd(streams IO) *cobra.Command {
 	format := "table"
