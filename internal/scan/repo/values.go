@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -59,6 +60,9 @@ func planValuesFiles(root string, entries []repositoryEntry, exclude []string) (
 		if err != nil {
 			continue // the regular scan reports the read error
 		}
+		if !containsFold(data, valuesFileNeedle) {
+			continue // the file declares no values file, so it is not parsed
+		}
 		refs := detect.ValuesFileRefs(entry.path, data)
 		for _, ref := range refs.All() {
 			resolved, info, status := resolveValuesFile(root, filepath.Dir(entry.path), ref)
@@ -81,7 +85,7 @@ func planValuesFiles(root string, entries []repositoryEntry, exclude []string) (
 			}
 			planned[key] = true
 			display := displayPath(root, resolved)
-			if excluded(display, exclude) {
+			if len(exclude) != 0 && excluded(display, exclude) {
 				continue // an excluded file is neither scanned nor skipped
 			}
 			plans = append(plans, valuesPlan{path: resolved, display: display})
@@ -97,11 +101,36 @@ func planValuesFiles(root string, entries []repositoryEntry, exclude []string) (
 // Kustomization file, or any YAML file, which may hold a
 // HelmChartInflationGenerator (spec section 9.2).
 func declaresValuesFile(path string) bool {
-	if detect.IsKustomizationFile(path) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".yaml" || ext == ".yml" {
 		return true
 	}
-	lower := strings.ToLower(path)
-	return strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
+	// Only the extensionless Kustomization file is left: the other two names
+	// kustomize accepts end in .yaml or .yml.
+	base := filepath.Base(path)
+	return len(base) == len("kustomization") && detect.IsKustomizationFile(path)
+}
+
+// valuesFileNeedle is the key a document declares its values file with. The
+// detector looks for the same key, ignoring case.
+var valuesFileNeedle = []byte("valuesfile")
+
+// containsFold reports whether data holds needle, ignoring case. It never
+// allocates, so the values pre-pass can look for the key in every file it
+// reads, before it parses the file.
+func containsFold(data, needle []byte) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	if len(data) < len(needle) {
+		return false
+	}
+	for i := 0; i+len(needle) <= len(data); i++ {
+		if bytes.EqualFold(data[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveValuesFile resolves a valuesFile reference relative to the directory

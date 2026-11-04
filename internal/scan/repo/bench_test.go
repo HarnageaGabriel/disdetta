@@ -8,10 +8,14 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"runtime/metrics"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/HarnageaGabriel/disdetta/internal/diag"
 	"github.com/HarnageaGabriel/disdetta/internal/report"
 	"github.com/HarnageaGabriel/disdetta/internal/scan/repo"
 )
@@ -27,6 +31,8 @@ const (
 	benchmarkSmallFiles  = 20
 	benchmarkMediumFiles = 200
 	benchmarkLargeFiles  = 2000
+	benchmarkWideFiles   = 100000
+	benchmarkWideDirs    = 100
 )
 
 // benchmarkBigFileMiB are the sizes of the big file stress fixtures. Every
@@ -44,6 +50,55 @@ func BenchmarkScanRepoMedium(b *testing.B) {
 
 func BenchmarkScanRepoLarge(b *testing.B) {
 	benchmarkScanRepo(b, benchmarkLargeFiles)
+}
+
+// BenchmarkScanRepoWide measures repository-walk overhead. Almost every file
+// has an extension the scanner ignores; a small deterministic subset is YAML.
+// The fixture holds 100000 files, so building it takes about a minute.
+func BenchmarkScanRepoWide(b *testing.B) {
+	root := wideBenchTree(b)
+	b.ReportAllocs()
+	peak := peakHeap(func() {
+		for b.Loop() {
+			got, err := repo.Scan(context.Background(), root)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if got.Summary.FilesScanned != benchmarkWideDirs {
+				b.Fatalf("scanned %d files, want %d", got.Summary.FilesScanned, benchmarkWideDirs)
+			}
+		}
+	})
+	b.ReportMetric(float64(peak)/(1<<20), "peak-heap-MB")
+	b.ReportMetric(filesPerSecond(benchmarkWideFiles, b.N, b.Elapsed()), "files/s")
+}
+
+// peakHeap runs fn and returns the peak live heap of the process, in bytes.
+// The heap is sampled with runtime/metrics, which does not stop the world, so
+// the measurement does not change what is measured.
+func peakHeap(fn func()) uint64 {
+	sample := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
+	stop := make(chan struct{})
+	done := make(chan uint64, 1)
+	go func() {
+		var peak uint64
+		for {
+			metrics.Read(sample)
+			if value := sample[0].Value.Uint64(); value > peak {
+				peak = value
+			}
+			select {
+			case <-stop:
+				done <- peak
+				return
+			default:
+			}
+			time.Sleep(500 * time.Microsecond)
+		}
+	}()
+	fn()
+	close(stop)
+	return <-done
 }
 
 func benchmarkScanRepo(b *testing.B, fileCount int) {
@@ -140,6 +195,60 @@ func TestScanRepoMediumDeterministicJSON(t *testing.T) {
 	}
 }
 
+// TestScanWideTreeResourceBounds is the regression test of the walk on a
+// large tree: the scan of a tree of many files the scanner does not read must
+// stay inside its time and memory budget.
+func TestScanWideTreeResourceBounds(t *testing.T) {
+	const fileCount = 5000
+	root := generateWideBenchTree(t, fileCount, 50)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if raceBuild() {
+		if _, err := repo.Scan(ctx, root); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	var got diag.Report
+	peak := peakHeap(func() {
+		var err error
+		got, err = repo.Scan(ctx, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	runtime.ReadMemStats(&after)
+	if got.Summary.FilesScanned != 50 {
+		t.Fatalf("scanned %d files, want 50", got.Summary.FilesScanned)
+	}
+	allocated := after.TotalAlloc - before.TotalAlloc
+	const maxAllocated = 6 * 1024 * 1024
+	if allocated > maxAllocated {
+		t.Fatalf("scan allocated %d bytes, want at most %d", allocated, maxAllocated)
+	}
+	const maxPeak = 8 * 1024 * 1024
+	if peak > maxPeak {
+		t.Fatalf("the scan peaked at %d bytes of live heap, want at most %d", peak, maxPeak)
+	}
+}
+
+func raceBuild() bool {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "-race" && setting.Value == "true" {
+			return true
+		}
+	}
+	return false
+}
+
 // generateBenchTree writes a tree of fileCount small files with the same
 // shape as a GitOps repository, and returns its root and its size in bytes.
 func generateBenchTree(tb testing.TB, fileCount int, seed int64) (string, int64) {
@@ -179,6 +288,64 @@ func generateBenchTree(tb testing.TB, fileCount int, seed int64) (string, int64)
 		}
 	}
 	return root, total
+}
+
+// wideTreeEnv names the directory of the wide benchmark tree. When it is set
+// and holds the tree already, the benchmark uses it as it is and the profile
+// of a measurement holds the scan only, not the building of the tree.
+const wideTreeEnv = "DISDETTA_WIDE_TREE"
+
+// TestBuildWideTree builds the wide benchmark tree under the directory the
+// environment variable names, so a measurement can be repeated without
+// building 100000 files again.
+func TestBuildWideTree(t *testing.T) {
+	root := os.Getenv(wideTreeEnv)
+	if root == "" {
+		t.Skip("DISDETTA_WIDE_TREE is not set")
+	}
+	writeWideTree(t, root, benchmarkWideFiles, benchmarkWideDirs)
+}
+
+// generateWideBenchTree writes a tree of fileCount files in dirCount
+// directories and returns its root. Almost every file has an extension the
+// scanner ignores; a small deterministic subset is YAML.
+func generateWideBenchTree(tb testing.TB, fileCount, dirCount int) string {
+	root := tb.TempDir()
+	writeWideTree(tb, root, fileCount, dirCount)
+	return root
+}
+
+// wideBenchTree returns the root of the tree of BenchmarkScanRepoWide. It
+// reuses the tree the environment variable names when it holds it already,
+// so a measurement can be repeated without building 100000 files again.
+func wideBenchTree(tb testing.TB) string {
+	if root := os.Getenv(wideTreeEnv); root != "" {
+		if _, err := os.Stat(filepath.Join(root, fmt.Sprintf("dir-%03d", benchmarkWideDirs-1))); err == nil {
+			return root
+		}
+	}
+	return generateWideBenchTree(tb, benchmarkWideFiles, benchmarkWideDirs)
+}
+
+func writeWideTree(tb testing.TB, root string, fileCount, dirCount int) {
+	for dir := 0; dir < dirCount; dir++ {
+		dirPath := filepath.Join(root, fmt.Sprintf("dir-%03d", dir))
+		if err := os.MkdirAll(dirPath, 0o755); err != nil {
+			tb.Fatal(err)
+		}
+		for file := dir; file < fileCount; file += dirCount {
+			ext := ".txt"
+			contents := ""
+			if file < dirCount {
+				ext = ".yaml"
+				contents = "apiVersion: v1\nkind: ConfigMap\n"
+			}
+			name := fmt.Sprintf("file-%06d%s", file, ext)
+			if err := os.WriteFile(filepath.Join(dirPath, name), []byte(contents), 0o600); err != nil {
+				tb.Fatal(err)
+			}
+		}
+	}
 }
 
 // generateBigFileTree writes the big file stress fixture: one YAML manifest

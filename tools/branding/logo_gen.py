@@ -1,6 +1,5 @@
 """Generate the disdetta logo: a Bitnami-style container under a magnifying glass, struck through.
 
-Same system as the trasloco logo (flat isometric box, ink/paper swap for dark mode, one accent).
 Usage: python tools/branding/logo_gen.py docs/assets [preview.html]
 The optional preview page must not be committed.
 """

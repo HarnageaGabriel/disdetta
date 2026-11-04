@@ -1,0 +1,172 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 12,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 4,
+      "medium": 2,
+      "low": 0
+    },
+    "diagnostics": 4,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": false
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "Kustomization",
+        "line": 3,
+        "column": 12
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "035f0736fcd40def"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "unresolved",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "chart/templates/deployment.yaml",
+        "line": 10,
+        "column": 18
+      },
+      "reference": "docker.io/bitnami/postgresql:{{…}}",
+      "original": "bitnami/postgresql:{{…}}",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "afe8cb8990842cf5"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "chart/values.yaml",
+        "line": 5,
+        "column": 12
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "e155ccd0e274b010"
+    },
+    {
+      "ruleId": "DSD-IMG-002",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "redis",
+      "location": {
+        "path": "template.tpl",
+        "line": 1,
+        "column": 8
+      },
+      "reference": "docker.io/bitnami/redis:7",
+      "original": "bitnami/redis:7",
+      "attributes": [
+        "pull-risk"
+      ],
+      "fingerprint": "c4df2d55a949408e"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "medium",
+      "component": "app",
+      "location": {
+        "path": "generator.yaml",
+        "line": 3,
+        "column": 7
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "9ff5519dc85afdf7"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "medium",
+      "component": "app",
+      "location": {
+        "path": "missing-values.yaml",
+        "line": 3,
+        "column": 7
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "https://charts.bitnami.com/bitnami",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "6e09b2b6f1df90fc"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "DSD-SCN-001",
+      "level": "error",
+      "message": "malformed YAML",
+      "location": {
+        "path": "broken.yaml",
+        "line": 0,
+        "column": 0
+      }
+    },
+    {
+      "code": "DSD-SCN-007",
+      "level": "info",
+      "message": "file read as template text",
+      "location": {
+        "path": "chart/templates/deployment.yaml",
+        "line": 0,
+        "column": 0
+      }
+    },
+    {
+      "code": "DSD-SCN-004",
+      "level": "error",
+      "message": "values file \"chart/absent.yaml\" not found",
+      "location": {
+        "path": "missing-values.yaml",
+        "line": 0,
+        "column": 0
+      }
+    },
+    {
+      "code": "DSD-SCN-007",
+      "level": "info",
+      "message": "file read as template text",
+      "location": {
+        "path": "template.tpl",
+        "line": 0,
+        "column": 0
+      }
+    }
+  ]
+}

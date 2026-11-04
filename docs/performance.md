@@ -60,6 +60,9 @@ Two benchmarks sit outside the tiers on purpose:
   total. It measures the cost of big files, not the cost of many files.
 - `BenchmarkScanRepoOversizedFile`: 1 file of 17 MiB, above the per file
   limit. The scanner rejects it on its metadata and never reads it.
+- `BenchmarkScanRepoWide`: 100000 files in 100 directories, 100 of them YAML
+  and the rest with an extension no detector reads. It measures the cost of
+  the walk itself. The section "Large trees" below holds its numbers.
 
 ### Detector benchmarks (`internal/detect`)
 
@@ -133,8 +136,10 @@ reported as a clean scan.
 The walk skips the `.git`, `node_modules` and `vendor` directories
 (`internal/scan/repo/repo.go`, `skippedDirectories`). Symlinks and other non
 regular files are skipped with `DSD-SCN-002`. Only `.yaml`, `.yml`,
-`.tpl`, `Dockerfile` and `Dockerfile.*` files are read and parsed; other
-files are visited by the walk but never opened.
+`.tpl`, `Dockerfile` and `Dockerfile.*` files are read and parsed; the other
+files are not visited by the walk at all: the walk decides from the name
+alone that no detector can read them and drops them before it looks at their
+metadata (see "Large trees" below).
 
 The threats each limit answers are in
 [docs/threat-model.md](threat-model.md), in the section "Hostile
@@ -201,9 +206,11 @@ memory. The findings limits above bound that, and the limit is reported as
 3. Reading. Each file is read whole into memory, up to the 16 MiB limit, and
    the bytes are then parsed, so the memory traffic is roughly twice the
    size of the repository.
-4. Walking. The repository walk is a single traversal with one metadata
-   lookup per entry. On a large monorepo the walk itself is not the
-   bottleneck, but it is also not free.
+4. Walking. The repository walk is a single traversal. It looks at the
+   metadata of the files a detector can read and of the files that are not
+   regular, and drops the files no detector can read from their name alone.
+   On a large monorepo the walk itself is not the bottleneck, but it is also
+   not free: the enumeration of the directories is the floor of its cost.
 5. Findings. Findings are de-duplicated, sorted and given a SHA-256
    fingerprint at the end of the scan. The cost grows with the number of
    findings, not with the number of files.
@@ -296,6 +303,106 @@ load of the machine between two sessions.
 - Work that stays sequential. The values file pre-pass reads every YAML file
   again, one file at a time, to find the values files the documents claim. It
   stays sequential on purpose, so a tree of many YAML files keeps a serial
-  part, and the pre-pass is one reason the small tiers gain the least.
+  part, and the pre-pass is one reason the small tiers gain the least. The
+  pre-pass only parses a file whose content mentions the `valuesFile` key, so
+  a file that declares no values file costs one read and one byte scan.
 - Big files. One file is parsed by one worker, so a tree of a few very large
   files gains less than a tree of many small ones.
+
+## Large trees
+
+A repository holds many more files than the scanner reads: sources, lock
+files, documentation and generated files. The walk used to collect every one
+of them up front, so each of them cost a metadata lookup, a relative path, an
+entry in the list of files and a job in the pool, even when no detector could
+ever read it.
+
+The walk now decides from the name of the file alone whether a detector can
+read it. A file no detector reads is dropped before the metadata lookup, so it
+costs nothing but the directory entry the operating system already gave. The
+decision uses the same names the scan uses (`internal/scan/repo/read.go`,
+`scannableName`), and the test `TestScannableNameMatchesTheScan` checks that
+the two never disagree. The files that are not regular keep their
+diagnostics: a link is still reported as skipped with `DSD-SCN-002`, whatever
+its name.
+
+### The measurement
+
+The benchmark `BenchmarkScanRepoWide` writes 100000 files in 100 directories
+under the temporary directory of the operating system: 100 YAML files and
+99900 files with an extension no detector reads. It measures the scan of that
+tree only; the tree is written before the measurement starts.
+
+```sh
+go test -run=NONE -bench=BenchmarkScanRepoWide -benchmem -benchtime=5x -count=3 ./internal/scan/repo/
+```
+
+Building the tree takes about a minute on Windows, so the benchmark reuses
+the tree when the environment variable `DISDETTA_WIDE_TREE` names a directory
+that holds it already. `go test -run=TestBuildWideTree` builds it there.
+
+The two columns below are the same tree, the same machine and the same
+command, run one after the other, five times each: the numbers are the
+median of the fifteen runs of each column.
+
+| measurement | before | after | change |
+| --- | --- | --- | --- |
+| time of one scan | 269.0 ms | 127.0 ms | 2.12x faster |
+| time per file | 2.69 us | 1.27 us | 2.12x faster |
+| memory allocated | 145.4 MB | 37.2 MB | 74 per cent less |
+| allocations | 810 545 | 410 330 | 49 per cent less |
+| peak live heap | 100.8 MB | 3.75 MB | 96 per cent less |
+
+The peak live heap is the peak of the live heap of the process during the
+scan, sampled with `runtime/metrics`; the benchmark reports it as the
+`peak-heap-MB` metric.
+
+The five rounds were run on an idle machine: they gave a ratio between
+2.01x and 3.44x, and the round medians moved between 216 and 437 ms for the
+before column and between 98.8 and 143 ms for the after column. The same
+comparison, measured while another process used four cores of the machine,
+gave a ratio between 1.07x and 3.27x, with a median of 1.93x: under load the
+ratio falls, because the walk of the after column is then bound by the
+enumeration of the directories, which is the cost of the operating system and
+not of the scanner. The memory numbers do not depend on the load of the
+machine.
+
+What the numbers say:
+
+- The scan of a tree of 100000 files no detector reads is 2.12x faster and
+  allocates 74 per cent less memory. The target of the issue, at least 2x
+  faster and 40 per cent less peak memory, is met on this machine.
+- The live heap of the scan no longer grows with the number of files of the
+  repository: 100000 files cost 3.75 MB of live heap, against 100.8 MB
+  before.
+- The other tiers are unchanged. Every file of the small, medium and large
+  tiers is read by a detector, so the walk drops none of them and the tiers
+  move inside the run to run noise of the machine.
+- What is left is the enumeration of the directories: in the profile of the
+  scan, 59 per cent of the samples are `os.ReadDir` and 10 per cent are the
+  paths the walk builds for the entries (`path/filepath.Join`). Both are the
+  cost of the operating system and of `path/filepath.WalkDir`, not of the
+  scanner.
+
+### The limits of the change
+
+- The walk drops the files no detector reads. It never drops a file a
+  detector would read, and it never drops a file that is not regular: a link
+  and a device are still reported as skipped with `DSD-SCN-002`, and a file
+  a detector reads whose metadata cannot be read is still reported as an
+  error with `DSD-SCN-004`.
+- One diagnostic is gone: a file no detector reads whose metadata cannot be
+  read was reported as an error, because the walk looked at the metadata of
+  every file. It is now dropped with the other files it was never read from.
+- The report of a repository never changes. The differential test
+  `TestScanMixedTreeMatchesGolden` scans a tree that holds one file of every
+  kind and compares the report with the golden file the scanner produced
+  before the change, byte for byte.
+- The values file pre-pass still reads every YAML file again. It now looks
+  for the `valuesFile` key in the bytes of the file before it parses it, so
+  a file that declares no values file costs one read and one byte scan
+  instead of one read and one YAML parse.
+- The regression test `TestScanWideTreeResourceBounds` scans a tree of 5000
+  files under a time limit and checks that the scan stays inside its
+  allocation and peak heap budget. The memory bounds are skipped under
+  `-race`, where the numbers are not comparable.
