@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 // helmReleaseSecretType is the Secret type Helm uses for release storage
@@ -47,6 +51,13 @@ const MaxItemsPerList = 100000
 // DSD-SCN-005 diagnostic.
 const MaxPagesPerList = 1000
 
+// Test overrides keep limit regressions fast without changing the public
+// contract constants.
+var (
+	maxListResponseBytes int64 = MaxListResponseBytes
+	maxItemsPerList            = MaxItemsPerList
+)
+
 // Tier 3 Secret selectors: the server filters to deployed Helm release Secrets
 // by label and to the release type by field (Secrets support the type field
 // selector), and the client re-checks the type as defense in depth (review 03
@@ -77,14 +88,25 @@ func NewClientSource(opts Options) (Source, error) {
 		overrides.CurrentContext = opts.Context
 	}
 	deferred := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+	raw, err := deferred.RawConfig()
+	if err != nil {
+		return nil, errors.New("load kubeconfig: selected configuration is invalid or unreadable")
+	}
+	userName, authInfo := selectedAuthInfo(raw, overrides)
 	config, err := deferred.ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf("load kubeconfig: %w", err)
+		return nil, safeKubeconfigError("load", userName, authInfo)
 	}
 	if opts.DenyExecPlugins {
-		if err := refuseExecPlugins(deferred, overrides, config); err != nil {
+		if err := refuseExecPlugins(userName, config); err != nil {
 			return nil, err
 		}
+	}
+	if err := refusePlaintextCredentials(config); err != nil {
+		return nil, err
+	}
+	if err := refusePlaintextAuthInfo(config, authInfo); err != nil {
+		return nil, err
 	}
 	// The API server is untrusted for content (threat model T2, audit F1):
 	// no transparent decompression and a hard limit on every response body.
@@ -94,7 +116,7 @@ func NewClientSource(opts Options) (Source, error) {
 	}
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("build kubernetes client: %w", err)
+		return nil, safeKubeconfigError("build client for", userName, authInfo)
 	}
 	return &ClientSource{client: client, timeout: defaultRequestTimeout}, nil
 }
@@ -104,8 +126,7 @@ func NewClientSource(opts Options) (Source, error) {
 // an auth provider, so a hostile kubeconfig runs a program on the machine of
 // the scan (threat model T13, audit F3). The check runs before the client is
 // built, so no plugin ever runs.
-func refuseExecPlugins(deferred clientcmd.ClientConfig, overrides *clientcmd.ConfigOverrides, config *rest.Config) error {
-	name := selectedUserName(deferred, overrides)
+func refuseExecPlugins(name string, config *rest.Config) error {
 	switch {
 	case config.ExecProvider != nil:
 		return fmt.Errorf("kubeconfig user %q uses an exec credential plugin, which runs a program; --deny-exec-plugins refuses it", name)
@@ -115,25 +136,77 @@ func refuseExecPlugins(deferred clientcmd.ClientConfig, overrides *clientcmd.Con
 	return nil
 }
 
-// selectedUserName returns the name of the user the selected context uses, or
-// an empty name when the kubeconfig names none.
-func selectedUserName(deferred clientcmd.ClientConfig, overrides *clientcmd.ConfigOverrides) string {
-	raw, err := deferred.RawConfig()
-	if err != nil {
-		return ""
-	}
+// selectedAuthInfo returns the selected user and its raw credential fields.
+func selectedAuthInfo(raw clientcmdapi.Config, overrides *clientcmd.ConfigOverrides) (string, *clientcmdapi.AuthInfo) {
 	contextName := overrides.CurrentContext
 	if contextName == "" {
 		contextName = raw.CurrentContext
 	}
 	if contextName == "" {
-		return ""
+		return "", nil
 	}
 	kubeContext, ok := raw.Contexts[contextName]
 	if !ok {
-		return ""
+		return "", nil
 	}
-	return kubeContext.AuthInfo
+	return kubeContext.AuthInfo, raw.AuthInfos[kubeContext.AuthInfo]
+}
+
+// safeKubeconfigError classifies credential loading failures without echoing
+// paths, tokens, server userinfo, or plugin commands from client-go errors.
+func safeKubeconfigError(action, user string, auth *clientcmdapi.AuthInfo) error {
+	field := "selected credentials"
+	if auth != nil {
+		switch {
+		case auth.TokenFile != "":
+			field = "tokenFile"
+		case auth.ClientKey != "":
+			field = "client-key"
+		case auth.ClientCertificate != "":
+			field = "client-certificate"
+		}
+	}
+	return fmt.Errorf("%s kubeconfig: cannot read %s for selected user %q", action, field, user)
+}
+
+// refusePlaintextCredentials prevents bearer and basic credentials from being
+// sent over cleartext to a remote host. Local test and development API servers
+// remain supported.
+func refusePlaintextCredentials(config *rest.Config) error {
+	server, err := url.Parse(config.Host)
+	if err != nil || !strings.EqualFold(server.Scheme, "http") {
+		return nil
+	}
+	host := server.Hostname()
+	loopback := strings.EqualFold(host, "localhost")
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		loopback = true
+	}
+	credentials := server.User != nil || config.BearerToken != "" || config.BearerTokenFile != "" || config.Username != "" || config.Password != "" || config.ExecProvider != nil || config.AuthProvider != nil
+	if credentials && !loopback {
+		return errors.New("refusing to send kubeconfig credentials over plain HTTP to a non-loopback API server")
+	}
+	return nil
+}
+
+// refusePlaintextAuthInfo refuses a kubeconfig whose selected user holds
+// credentials when the server is plain http:// on a non-loopback host.
+// client-go drops the token, the password and the certificate of a user on a
+// transport without TLS, so the scan would silently run unauthenticated (or
+// send them in plaintext through a proxy if that behaviour changes): either
+// way it is not what the user meant, and the scan stops with a clear message.
+func refusePlaintextAuthInfo(config *rest.Config, auth *clientcmdapi.AuthInfo) error {
+	if auth == nil {
+		return nil
+	}
+	held := auth.Token != "" || auth.TokenFile != "" || auth.Username != "" || auth.Password != "" ||
+		auth.ClientCertificate != "" || len(auth.ClientCertificateData) > 0 || auth.Exec != nil || auth.AuthProvider != nil
+	if !held {
+		return nil
+	}
+	probe := *config
+	probe.BearerToken = "held"
+	return refusePlaintextCredentials(&probe)
 }
 
 // hardeningTransport wraps the client-go transport so a hostile API server
@@ -167,6 +240,10 @@ func (t *hardeningTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, &redirectError{status: resp.StatusCode}
 	}
 	if resp.Body != nil {
+		if resp.ContentLength > maxListResponseBytes {
+			_ = resp.Body.Close()
+			return nil, errResponseTooLarge
+		}
 		resp.Body = &limitedBody{body: resp.Body}
 	}
 	return resp, nil
@@ -182,15 +259,15 @@ type limitedBody struct {
 
 // Read reads one chunk and fails when the limit is passed.
 func (b *limitedBody) Read(p []byte) (int, error) {
-	if b.read >= MaxListResponseBytes {
+	if b.read > maxListResponseBytes {
 		return 0, errResponseTooLarge
 	}
-	if remaining := MaxListResponseBytes - b.read + 1; int64(len(p)) > remaining {
+	if remaining := maxListResponseBytes - b.read + 1; int64(len(p)) > remaining {
 		p = p[:int(remaining)]
 	}
 	n, err := b.body.Read(p)
 	b.read += int64(n)
-	if b.read > MaxListResponseBytes {
+	if b.read > maxListResponseBytes {
 		return 0, errResponseTooLarge
 	}
 	return n, err
@@ -231,11 +308,29 @@ func (s *ClientSource) ListWorkloads(ctx context.Context, namespaces []string) (
 	owners := ownerIndex{}
 	for _, namespace := range namespaceTargets(namespaces) {
 		out.Templates = append(out.Templates, s.deployments(ctx, namespace, owners, &failures)...)
+		if ctx.Err() != nil {
+			break
+		}
 		out.Templates = append(out.Templates, s.statefulSets(ctx, namespace, owners, &failures)...)
+		if ctx.Err() != nil {
+			break
+		}
 		out.Templates = append(out.Templates, s.daemonSets(ctx, namespace, owners, &failures)...)
+		if ctx.Err() != nil {
+			break
+		}
 		out.Templates = append(out.Templates, s.replicaSets(ctx, namespace, owners, &failures)...)
+		if ctx.Err() != nil {
+			break
+		}
 		out.Templates = append(out.Templates, s.jobs(ctx, namespace, owners, &failures)...)
+		if ctx.Err() != nil {
+			break
+		}
 		out.Templates = append(out.Templates, s.cronJobs(ctx, namespace, owners, &failures)...)
+		if ctx.Err() != nil {
+			break
+		}
 		out.Pods = append(out.Pods, s.pods(ctx, namespace, owners, &failures)...)
 	}
 	return out, failures
@@ -248,6 +343,9 @@ func (s *ClientSource) ListReleases(ctx context.Context, namespaces []string) ([
 	var failures []ListFailure
 	for _, namespace := range namespaceTargets(namespaces) {
 		out = append(out, s.releaseSecrets(ctx, namespace, &failures)...)
+		if ctx.Err() != nil {
+			break
+		}
 	}
 	return out, failures
 }
@@ -261,10 +359,10 @@ func (s *ClientSource) deployments(ctx context.Context, namespace string, owners
 		}
 		for i := range list.Items {
 			item := &list.Items[i]
-			indexOwners(owners, item.Namespace, "Deployment", item.Name, item.OwnerReferences)
 			if !budget.add() {
 				return "", errItemLimit
 			}
+			indexOwners(owners, item.Namespace, "Deployment", item.Name, item.OwnerReferences)
 			out = append(out, newWorkload(item, "Deployment", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -284,10 +382,10 @@ func (s *ClientSource) statefulSets(ctx context.Context, namespace string, owner
 		}
 		for i := range list.Items {
 			item := &list.Items[i]
-			indexOwners(owners, item.Namespace, "StatefulSet", item.Name, item.OwnerReferences)
 			if !budget.add() {
 				return "", errItemLimit
 			}
+			indexOwners(owners, item.Namespace, "StatefulSet", item.Name, item.OwnerReferences)
 			out = append(out, newWorkload(item, "StatefulSet", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -307,10 +405,10 @@ func (s *ClientSource) daemonSets(ctx context.Context, namespace string, owners 
 		}
 		for i := range list.Items {
 			item := &list.Items[i]
-			indexOwners(owners, item.Namespace, "DaemonSet", item.Name, item.OwnerReferences)
 			if !budget.add() {
 				return "", errItemLimit
 			}
+			indexOwners(owners, item.Namespace, "DaemonSet", item.Name, item.OwnerReferences)
 			out = append(out, newWorkload(item, "DaemonSet", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -330,14 +428,14 @@ func (s *ClientSource) replicaSets(ctx context.Context, namespace string, owners
 		}
 		for i := range list.Items {
 			item := &list.Items[i]
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			indexOwners(owners, item.Namespace, "ReplicaSet", item.Name, item.OwnerReferences)
 			// A ReplicaSet owned by a Deployment duplicates its template
 			// (spec v0.2 section 2, owner filtering).
 			if ownedBy(item.OwnerReferences, "Deployment") {
 				continue
-			}
-			if !budget.add() {
-				return "", errItemLimit
 			}
 			out = append(out, newWorkload(item, "ReplicaSet", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
@@ -358,14 +456,14 @@ func (s *ClientSource) jobs(ctx context.Context, namespace string, owners ownerI
 		}
 		for i := range list.Items {
 			item := &list.Items[i]
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			indexOwners(owners, item.Namespace, "Job", item.Name, item.OwnerReferences)
 			// A Job owned by a CronJob duplicates its jobTemplate (spec v0.2
 			// section 2, owner filtering).
 			if ownedBy(item.OwnerReferences, "CronJob") {
 				continue
-			}
-			if !budget.add() {
-				return "", errItemLimit
 			}
 			out = append(out, newWorkload(item, "Job", item.Spec.Template.Spec, item.Spec.Template.Labels))
 		}
@@ -386,10 +484,10 @@ func (s *ClientSource) cronJobs(ctx context.Context, namespace string, owners ow
 		}
 		for i := range list.Items {
 			item := &list.Items[i]
-			indexOwners(owners, item.Namespace, "CronJob", item.Name, item.OwnerReferences)
 			if !budget.add() {
 				return "", errItemLimit
 			}
+			indexOwners(owners, item.Namespace, "CronJob", item.Name, item.OwnerReferences)
 			out = append(out, newWorkload(item, "CronJob", item.Spec.JobTemplate.Spec.Template.Spec, item.Spec.JobTemplate.Spec.Template.Labels))
 		}
 		return list.Continue, nil
@@ -447,6 +545,9 @@ func (s *ClientSource) releaseSecrets(ctx context.Context, namespace string, fai
 		}
 		for i := range list.Items {
 			secret := &list.Items[i]
+			if !budget.add() {
+				return "", errItemLimit
+			}
 			// Defense in depth: the field selector excludes non-Helm Secrets, but
 			// a server may ignore it (spec v0.2 section 2).
 			if string(secret.Type) != helmReleaseSecretType {
@@ -456,9 +557,6 @@ func (s *ClientSource) releaseSecrets(ctx context.Context, namespace string, fai
 			payload := secret.Data["release"]
 			if name == "" || len(payload) == 0 {
 				continue
-			}
-			if !budget.add() {
-				return "", errItemLimit
 			}
 			version, _ := strconv.Atoi(secret.Labels["version"])
 			key := secret.Namespace + "\x00" + name
@@ -509,7 +607,7 @@ type listBudget struct {
 // add reserves one item of the list and reports false when the item cap is
 // reached (audit F1).
 func (b *listBudget) add() bool {
-	if b.items >= MaxItemsPerList {
+	if b.items >= maxItemsPerList {
 		return false
 	}
 	b.items++
@@ -521,20 +619,23 @@ func (b *listBudget) add() bool {
 // list stops at the page cap (audit F1). It stops at the first error and
 // returns it.
 func (s *ClientSource) listPages(ctx context.Context, limit int64, fn func(ctx context.Context, opts metav1.ListOptions, budget *listBudget) (string, error)) error {
-	requestCtx, cancel := context.WithTimeout(ctx, s.requestTimeout(ctx))
-	defer cancel()
 	budget := &listBudget{}
 	cont := ""
 	for {
-		if err := requestCtx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
+		requestCtx, cancel := context.WithTimeout(ctx, s.requestTimeout(ctx))
 		next, err := fn(requestCtx, metav1.ListOptions{Limit: limit, Continue: cont}, budget)
+		requestErr := requestCtx.Err()
+		cancel()
 		if err != nil {
-			if ctxErr := requestCtx.Err(); ctxErr != nil {
-				// The scan budget ended the request: report the budget, not
-				// the API error.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// The parent scan budget ended the request.
 				return ctxErr
+			}
+			if requestErr != nil {
+				return requestErr
 			}
 			return err
 		}

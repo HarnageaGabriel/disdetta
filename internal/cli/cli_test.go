@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/HarnageaGabriel/disdetta/internal/diag"
 )
 
 func TestExitCodeMatrix(t *testing.T) {
@@ -24,6 +26,19 @@ func TestExitCodeMatrix(t *testing.T) {
 				t.Fatalf("source docs/spec/v0.1.md section 7: got %d want %d stderr %s", got, tt.want, err.String())
 			}
 		})
+	}
+}
+
+func TestClusterFindingPolicyPrecedesIncompleteExit(t *testing.T) {
+	report := diag.Report{
+		Summary:  diag.Summary{Complete: false},
+		Findings: []diag.Finding{{Severity: diag.SeverityHigh}},
+	}
+	if got := reportExitCode(report, 0); got != ExitFindings {
+		t.Fatalf("finding policy exit = %d, want %d", got, ExitFindings)
+	}
+	if got := reportExitCode(report, -1); got != ExitIncomplete {
+		t.Fatalf("incomplete exit = %d, want %d", got, ExitIncomplete)
 	}
 }
 

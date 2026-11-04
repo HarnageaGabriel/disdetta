@@ -367,6 +367,53 @@ func TestScanTotalTimeBudget(t *testing.T) {
 	}
 }
 
+func TestScanPerRequestTimeoutIsIncomplete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/deployments") {
+			select {
+			case <-time.After(250 * time.Millisecond):
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apiVersion":"v1","items":[]}`))
+	}))
+	defer server.Close()
+	source := newHTTPSource(t, server.URL)
+	source.timeout = 50 * time.Millisecond
+	got, err := Scan(context.Background(), source, Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Summary.Complete || !hasDiagnostic(got, "DSD-SCN-010", diag.LevelError) {
+		t.Fatalf("per-request timeout was hidden: complete=%v diagnostics=%#v", got.Summary.Complete, got.Diagnostics)
+	}
+	for _, diagnostic := range got.Diagnostics {
+		if strings.Contains(diagnostic.Message, "total time budget") {
+			t.Fatalf("request timeout mislabeled as total budget: %#v", diagnostic)
+		}
+	}
+}
+
+func TestScanTimeoutBoundsPostListCPUWork(t *testing.T) {
+	workloads := make([]Workload, 100000)
+	for i := range workloads {
+		workloads[i] = Workload{Namespace: "db", Kind: "Deployment", Name: "web", Containers: []Container{{Name: "web", Image: "bitnami/redis:7"}}}
+	}
+	start := time.Now()
+	got, err := Scan(context.Background(), &fakeSource{workloads: Workloads{Templates: workloads}}, Options{Timeout: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("post-list work exceeded guard: %s", elapsed)
+	}
+	if got.Summary.Complete || !hasDiagnostic(got, "DSD-SCN-005", diag.LevelWarning) {
+		t.Fatalf("CPU timeout not reported: %#v", got)
+	}
+}
+
 // TestScanListLimitDiagnostic checks adversarial audit F1: a list that reached
 // a safety limit is reported as DSD-SCN-005 and the scan is incomplete.
 func TestScanListLimitDiagnostic(t *testing.T) {

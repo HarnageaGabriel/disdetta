@@ -16,11 +16,13 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -550,6 +552,106 @@ func TestClientSourceStopsAtItemCap(t *testing.T) {
 	}
 }
 
+func TestFilteredReplicaSetsCountTowardItemCap(t *testing.T) {
+	old := maxItemsPerList
+	maxItemsPerList = 5
+	t.Cleanup(func() { maxItemsPerList = old })
+	source, client := newSource(t)
+	controller := true
+	calls := 0
+	client.PrependReactor("list", "replicasets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		items := make([]appsv1.ReplicaSet, 2)
+		for i := range items {
+			items[i].Namespace = "db"
+			items[i].Name = fmt.Sprintf("rs-%d-%d", calls, i)
+			items[i].OwnerReferences = []metav1.OwnerReference{{Kind: "Deployment", Name: "web", Controller: &controller}}
+		}
+		return true, &appsv1.ReplicaSetList{ListMeta: metav1.ListMeta{Continue: "again"}, Items: items}, nil
+	})
+	owners := ownerIndex{}
+	var failures []ListFailure
+	got := source.replicaSets(context.Background(), "db", owners, &failures)
+	if len(got) != 0 || calls != 3 || len(owners) != maxItemsPerList {
+		t.Fatalf("filtered items escaped cap: workloads=%d calls=%d owners=%d", len(got), calls, len(owners))
+	}
+	if len(failures) != 1 || failures[0].Code != "DSD-SCN-005" {
+		t.Fatalf("failures %#v", failures)
+	}
+}
+
+func TestListResponseBodyLimitBoundaries(t *testing.T) {
+	old := maxListResponseBytes
+	maxListResponseBytes = 256
+	t.Cleanup(func() { maxListResponseBytes = old })
+	base := []byte(`{"apiVersion":"v1","items":[]}`)
+	t.Run("exact limit", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A valid empty list of the kind the path asks for, padded with
+			// whitespace to exactly the limit.
+			kind, version := "DeploymentList", "apps/v1"
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/statefulsets"):
+				kind = "StatefulSetList"
+			case strings.HasSuffix(r.URL.Path, "/daemonsets"):
+				kind = "DaemonSetList"
+			case strings.HasSuffix(r.URL.Path, "/replicasets"):
+				kind = "ReplicaSetList"
+			case strings.HasSuffix(r.URL.Path, "/jobs"):
+				kind, version = "JobList", "batch/v1"
+			case strings.HasSuffix(r.URL.Path, "/cronjobs"):
+				kind, version = "CronJobList", "batch/v1"
+			}
+			valid := []byte(`{"kind":"` + kind + `","apiVersion":"` + version + `","items":[]}`)
+			body := append(valid, bytes.Repeat([]byte(" "), int(maxListResponseBytes)-len(valid))...)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(body)
+		}))
+		defer server.Close()
+		if _, failures := newHTTPSource(t, server.URL).ListWorkloads(context.Background(), []string{"db"}); len(failures) != 0 {
+			t.Fatalf("exact limit rejected: %#v", failures)
+		}
+	})
+	t.Run("limit plus one chunked", func(t *testing.T) {
+		body := append(base, bytes.Repeat([]byte(" "), int(maxListResponseBytes)+1-len(base))...)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.(http.Flusher).Flush()
+			_, _ = w.Write(body)
+		}))
+		defer server.Close()
+		if _, failures := newHTTPSource(t, server.URL).ListWorkloads(context.Background(), []string{"db"}); len(failures) == 0 {
+			t.Fatal("chunked over-limit body accepted")
+		}
+	})
+}
+
+type unreadBody struct{ reads int }
+
+func (b *unreadBody) Read([]byte) (int, error) { b.reads++; return 0, io.EOF }
+func (*unreadBody) Close() error               { return nil }
+
+type responseRoundTripper struct{ response *http.Response }
+
+func (r responseRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return r.response, nil
+}
+
+func TestDeclaredOversizedBodyRejectedBeforeRead(t *testing.T) {
+	old := maxListResponseBytes
+	maxListResponseBytes = 32
+	t.Cleanup(func() { maxListResponseBytes = old })
+	body := &unreadBody{}
+	transport := &hardeningTransport{base: responseRoundTripper{response: &http.Response{StatusCode: http.StatusOK, ContentLength: 33, Body: body, Header: make(http.Header)}}}
+	req, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+	if _, err := transport.RoundTrip(req); !errors.Is(err, errResponseTooLarge) {
+		t.Fatalf("error %v", err)
+	}
+	if body.reads != 0 {
+		t.Fatalf("oversized declared body was read %d times", body.reads)
+	}
+}
+
 // TestClientSourceRefusesRedirect checks adversarial audit F4: a redirect
 // answer is never followed, so the bearer token never reaches the target, and
 // the diagnostic names the status and not the Location.
@@ -585,6 +687,61 @@ func TestClientSourceRefusesRedirect(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("audit F4: no failure names the redirect status: %#v", failures)
+	}
+}
+
+func TestClientSourceRefusesRedirectStatusesAndDiscovery(t *testing.T) {
+	for _, status := range []int{http.StatusMovedPermanently, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", "https://example.invalid/steal")
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			source := newHTTPSource(t, server.URL)
+			if _, err := source.client.Discovery().ServerVersion(); err == nil {
+				t.Fatal("version redirect accepted")
+			}
+			if _, err := source.client.Discovery().ServerGroups(); err == nil {
+				t.Fatal("discovery redirect accepted")
+			}
+		})
+	}
+}
+
+func TestKubeconfigTokenFileErrorHidesPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "private", "token-value")
+	kubeconfig := writeKubeconfig(t, "https://127.0.0.1:1")
+	data, err := os.ReadFile(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data, []byte("token: test-token"), []byte("tokenFile: "+missing), 1)
+	if err := os.WriteFile(kubeconfig, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewClientSource(Options{Kubeconfig: kubeconfig})
+	if err == nil || !strings.Contains(err.Error(), "tokenFile") || strings.Contains(err.Error(), missing) {
+		t.Fatalf("unsafe error: %v", err)
+	}
+}
+
+func TestPlainHTTPKubeconfigCredentials(t *testing.T) {
+	if _, err := NewClientSource(Options{Kubeconfig: writeKubeconfig(t, "http://api.example.test")}); err == nil || !strings.Contains(err.Error(), "plain HTTP") {
+		t.Fatalf("remote plaintext credentials accepted: %v", err)
+	}
+	for _, host := range []string{"127.0.0.1", "localhost", "[::1]"} {
+		if _, err := NewClientSource(Options{Kubeconfig: writeKubeconfig(t, "http://"+host+":1")}); err != nil {
+			t.Errorf("loopback %s rejected: %v", host, err)
+		}
+	}
+	for _, config := range []*rest.Config{
+		{Host: "http://api.example.test", Username: "user", Password: "password"},
+		{Host: "http://user:password@api.example.test"},
+	} {
+		if err := refusePlaintextCredentials(config); err == nil {
+			t.Errorf("plaintext basic credentials accepted for %q", config.Host)
+		}
 	}
 }
 
@@ -661,6 +818,102 @@ func TestClientSourceRefusesExecPlugins(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("audit F3: the credential plugin ran: %v", err)
+	}
+}
+
+func writeRawKubeconfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestDenyExecPluginsSelectedUserVariants(t *testing.T) {
+	const config = `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster:
+    server: https://127.0.0.1:1
+contexts:
+- name: safe
+  context: {cluster: test, user: safe}
+- name: hostile
+  context: {cluster: test, user: hostile}
+current-context: hostile
+users:
+- name: safe
+  user: {token: safe-token}
+- name: hostile
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: planted-command
+      interactiveMode: Never
+`
+	path := writeRawKubeconfig(t, config)
+	if _, err := NewClientSource(Options{Kubeconfig: path, Context: "safe", DenyExecPlugins: true}); err != nil {
+		t.Fatalf("unselected exec user caused refusal: %v", err)
+	}
+	if _, err := NewClientSource(Options{Kubeconfig: path, Context: "hostile", DenyExecPlugins: true}); err == nil || !strings.Contains(err.Error(), `user "hostile"`) {
+		t.Fatalf("selected context exec was not refused safely: %v", err)
+	}
+}
+
+func TestDenyExecPluginsRefusesAuthProvider(t *testing.T) {
+	path := writeRawKubeconfig(t, `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster: {server: https://127.0.0.1:1}
+contexts:
+- name: test
+  context: {cluster: test, user: auth-user}
+current-context: test
+users:
+- name: auth-user
+  user:
+    auth-provider:
+      name: planted-provider
+`)
+	if _, err := NewClientSource(Options{Kubeconfig: path, DenyExecPlugins: true}); err == nil || !strings.Contains(err.Error(), "auth provider plugin") {
+		t.Fatalf("auth-provider was not refused: %v", err)
+	}
+}
+
+func TestDenyExecPluginsMergedKubeconfigs(t *testing.T) {
+	contextFile := writeRawKubeconfig(t, `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster: {server: https://127.0.0.1:1}
+contexts:
+- name: test
+  context: {cluster: test, user: merged-user}
+current-context: test
+`)
+	userFile := writeRawKubeconfig(t, `apiVersion: v1
+kind: Config
+users:
+- name: merged-user
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: planted-command
+      interactiveMode: Never
+`)
+	t.Setenv("KUBECONFIG", contextFile+string(os.PathListSeparator)+userFile)
+	if _, err := NewClientSource(Options{DenyExecPlugins: true}); err == nil || !strings.Contains(err.Error(), `user "merged-user"`) {
+		t.Fatalf("merged exec user was not refused: %v", err)
+	}
+}
+
+func TestDenyExecPluginsAllowsInClusterConfig(t *testing.T) {
+	config := &rest.Config{Host: "https://kubernetes.default.svc", BearerTokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token"}
+	if err := refuseExecPlugins("serviceaccount", config); err != nil {
+		t.Fatalf("in-cluster credentials refused as a plugin: %v", err)
 	}
 }
 

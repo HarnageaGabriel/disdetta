@@ -126,3 +126,14 @@ Mitigations:
   as a scan in CI with a kubeconfig that carries a service-account token.
 - The refusal is opt-in: the cloud kubeconfigs (EKS, GKE, AKS) need their
   `exec` plugin, so the default is unchanged (threat model T13).
+
+## Risk: proxies receive cluster credentials
+
+The Kubernetes client honors `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` from
+the environment, plus `proxy-url` on the selected kubeconfig cluster. Set
+`NO_PROXY` when the API server must be reached directly. Only use a proxy you
+trust: a TLS-inspection proxy terminates TLS and can see the bearer token.
+
+Disdetta refuses bearer or basic credentials for a plain `http://` API server
+on a non-loopback host (usage error, exit 2). Plain HTTP remains available for
+local development servers at `127.0.0.1`, `::1` and `localhost`.

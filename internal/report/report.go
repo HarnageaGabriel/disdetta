@@ -2,7 +2,6 @@
 package report
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -164,38 +164,98 @@ func SARIF(w io.Writer, r diag.Report) error {
 // survive raw in a machine-readable output and writes it to w (spec section 6,
 // adversarial audit F5).
 func writeJSON(w io.Writer, v any) error {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	escaped := &formatEscapingWriter{dst: w}
+	enc := json.NewEncoder(escaped)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
 		return err
 	}
-	_, err := w.Write(escapeFormatChars(buf.Bytes()))
-	return err
+	return escaped.Flush()
 }
 
-// escapeFormatChars rewrites every character that SafeText escapes in the
-// table, except the control characters encoding/json already escapes, as a
-// JSON \uXXXX escape. The rewrite is lossless: a JSON parser decodes the
-// escape back to the original character, and no raw bidi override, zero-width
-// character or line separator survives in the output.
-func escapeFormatChars(data []byte) []byte {
-	out := make([]byte, 0, len(data))
+// formatEscapingWriter streams JSON while escaping format characters. At most
+// three bytes are retained when a UTF-8 rune is split across Write calls.
+type formatEscapingWriter struct {
+	dst     io.Writer
+	pending []byte
+}
+
+func (w *formatEscapingWriter) Write(p []byte) (int, error) {
+	originalLen := len(p)
+	data := p
+	if len(w.pending) > 0 {
+		data = append(append(make([]byte, 0, len(w.pending)+len(p)), w.pending...), p...)
+		w.pending = w.pending[:0]
+	}
+	start := 0
 	for i := 0; i < len(data); {
-		r, size := utf8.DecodeRune(data[i:])
-		if r == utf8.RuneError && size == 1 {
-			out = append(out, data[i])
-			i++
-			continue
+		if !utf8.FullRune(data[i:]) {
+			if err := writeAll(w.dst, data[start:i]); err != nil {
+				return 0, err
+			}
+			w.pending = append(w.pending, data[i:]...)
+			return originalLen, nil
 		}
+		r, size := utf8.DecodeRune(data[i:])
 		if needsJSONEscape(r) {
-			out = append(out, fmt.Sprintf(`\u%04x`, r)...)
-		} else {
-			out = append(out, data[i:i+size]...)
+			if err := writeAll(w.dst, data[start:i]); err != nil {
+				return 0, err
+			}
+			if err := writeEscapedRune(w.dst, r); err != nil {
+				return 0, err
+			}
+			start = i + size
 		}
 		i += size
 	}
-	return out
+	if err := writeAll(w.dst, data[start:]); err != nil {
+		return 0, err
+	}
+	return originalLen, nil
+}
+
+func (w *formatEscapingWriter) Flush() error {
+	if len(w.pending) == 0 {
+		return nil
+	}
+	err := writeAll(w.dst, w.pending)
+	w.pending = nil
+	return err
+}
+
+func writeEscapedRune(w io.Writer, r rune) error {
+	if r <= 0xffff {
+		return writeUnicodeEscape(w, uint16(r))
+	}
+	high, low := utf16.EncodeRune(r)
+	if err := writeUnicodeEscape(w, uint16(high)); err != nil {
+		return err
+	}
+	return writeUnicodeEscape(w, uint16(low))
+}
+
+func writeUnicodeEscape(w io.Writer, value uint16) error {
+	const hex = "0123456789abcdef"
+	escape := [6]byte{'\\', 'u', 0, 0, 0, 0}
+	escape[2] = hex[value>>12]
+	escape[3] = hex[value>>8&0xf]
+	escape[4] = hex[value>>4&0xf]
+	escape[5] = hex[value&0xf]
+	return writeAll(w, escape[:])
+}
+
+func writeAll(w io.Writer, p []byte) error {
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		p = p[n:]
+	}
+	return nil
 }
 
 // needsJSONEscape reports whether a character must be written as a JSON

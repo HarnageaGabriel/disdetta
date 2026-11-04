@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTableEscapesCellsAndSummarizes(t *testing.T) {
@@ -107,6 +112,91 @@ func TestJSONEscapesFormatCharacters(t *testing.T) {
 	}
 	if decoded.Diagnostics[0].Message != "hostile \u202e name" || decoded.Diagnostics[0].Location.Path != "cluster/db/"+name {
 		t.Errorf("audit F5: the JSON does not decode back to the original diagnostic: %#v", decoded.Diagnostics[0])
+	}
+}
+
+func TestStreamingJSONMatchesBufferedOutputForGoldens(t *testing.T) {
+	root := filepath.Join("..", "..", "testdata")
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || (!strings.HasSuffix(path, ".json.golden") && !strings.HasSuffix(path, ".sarif.golden")) {
+			return nil
+		}
+		name, _ := filepath.Rel(root, path)
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value any
+			if err := json.Unmarshal(data, &value); err != nil {
+				t.Fatal(err)
+			}
+			var streamed, buffered bytes.Buffer
+			if err := writeJSON(&streamed, value); err != nil {
+				t.Fatal(err)
+			}
+			var raw bytes.Buffer
+			enc := json.NewEncoder(&raw)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(value); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < len(raw.Bytes()); {
+				r, size := utf8.DecodeRune(raw.Bytes()[i:])
+				if needsJSONEscape(r) {
+					_, _ = fmt.Fprintf(&buffered, `\u%04x`, r)
+				} else {
+					_, _ = buffered.Write(raw.Bytes()[i : i+size])
+				}
+				i += size
+			}
+			if !bytes.Equal(streamed.Bytes(), buffered.Bytes()) {
+				t.Fatal("streaming output differs from buffered output")
+			}
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFormatEscapingWriterRetainsSplitRune(t *testing.T) {
+	var out bytes.Buffer
+	w := &formatEscapingWriter{dst: &out}
+	encoded := []byte("a\u202eb")
+	if _, err := w.Write(encoded[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(encoded[2:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), `a\u202eb`; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestJSONEscapesSupplementaryFormatCharactersLosslessly(t *testing.T) {
+	original := "tag:\U000e0001 music:\U0001d173"
+	var out bytes.Buffer
+	if err := writeJSON(&out, original); err != nil {
+		t.Fatal(err)
+	}
+	var decoded string
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded != original {
+		t.Fatalf("round trip got %q want %q; JSON %s", decoded, original, out.Bytes())
+	}
+	if strings.Contains(out.String(), "e0001") || strings.Contains(out.String(), "1d173") {
+		t.Fatalf("non-surrogate escape emitted: %s", out.Bytes())
 	}
 }
 

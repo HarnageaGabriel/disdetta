@@ -136,13 +136,8 @@ func newScanCmd(streams IO) *cobra.Command {
 		if scanErr != nil {
 			return &exitError{ExitError, fmt.Errorf("write report: %w", scanErr)}
 		}
-		for _, f := range result.Findings {
-			if threshold >= 0 && diag.SeverityRank(f.Severity) <= threshold {
-				return &exitError{code: ExitFindings}
-			}
-		}
-		if !result.Summary.Complete {
-			return &exitError{code: ExitIncomplete}
+		if code := reportExitCode(result, threshold); code != ExitOK {
+			return &exitError{code: code}
 		}
 		return nil
 	}}
@@ -159,6 +154,20 @@ func newScanCmd(streams IO) *cobra.Command {
 	cmd.Flags().BoolVar(&denyExecPlugins, "deny-exec-plugins", false, "refuse a --cluster kubeconfig whose user runs a credential plugin (exec or auth provider)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "total time budget of the --cluster scan (e.g. 30s)")
 	return cmd
+}
+
+// reportExitCode preserves the v0.1 precedence: a finding-policy failure wins
+// over incompleteness; otherwise an incomplete scan exits 3.
+func reportExitCode(result diag.Report, threshold int) int {
+	for _, f := range result.Findings {
+		if threshold >= 0 && diag.SeverityRank(f.Severity) <= threshold {
+			return ExitFindings
+		}
+	}
+	if !result.Summary.Complete {
+		return ExitIncomplete
+	}
+	return ExitOK
 }
 func newRulesCmd(streams IO) *cobra.Command {
 	format := "table"
