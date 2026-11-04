@@ -1,0 +1,8 @@
+LOCATION            RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
+queue.gotmpl:6:17   DSD-IMG-001  high      confirmed   medium   docker.io/bitnamilegacy/queue-operator:2.0.0
+queue.gotmpl:13:19  DSD-IMG-001  high      confirmed   medium   docker.io/bitnamilegacy/topology-operator:1.5.0
+queue.gotmpl:18:15  DSD-IMG-001  high      confirmed   medium   docker.io/bitnamilegacy/credential-updater:1.1.0
+queue.gotmpl:23:15  DSD-IMG-001  high      confirmed   medium   docker.io/bitnamilegacy/queue-server:4.2.0
+cache.gotmpl:5:26   DSD-CFG-001  high      confirmed   unknown  true
+queue.gotmpl:28:26  DSD-CFG-001  high      confirmed   unknown  true
+scanned 2 files, skipped 0, findings 6 (high 6, medium 0, low 0), diagnostics 2, unresolved 0, ignored 0

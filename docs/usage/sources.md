@@ -104,8 +104,8 @@ Chart.yaml:14:5  DSD-CHT-002  medium    confirmed   high    https://github.com/b
 
 Templates are not YAML, so they are read line by line instead of being
 reported as malformed. A file is read as template text when it is under the
-`templates/` directory of a chart, when it ends with `.tpl` or
-`.yaml.gotmpl`, or when it does not parse as YAML and contains `{{`.
+`templates/` directory of a chart, when it ends with `.tpl` or `.gotmpl`, or
+when it does not parse as YAML and contains `{{`.
 
 Detected:
 

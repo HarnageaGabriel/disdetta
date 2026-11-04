@@ -1,0 +1,140 @@
+{
+  "schemaVersion": "1",
+  "tool": {
+    "name": "disdetta",
+    "version": "dev"
+  },
+  "summary": {
+    "filesScanned": 2,
+    "filesSkipped": 0,
+    "findings": {
+      "high": 6,
+      "medium": 0,
+      "low": 0
+    },
+    "diagnostics": 2,
+    "unresolved": 0,
+    "ignored": 0,
+    "complete": true
+  },
+  "findings": [
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "medium",
+      "component": "queue-operator",
+      "location": {
+        "path": "queue.gotmpl",
+        "line": 6,
+        "column": 17
+      },
+      "reference": "docker.io/bitnamilegacy/queue-operator:2.0.0",
+      "original": "docker.io/bitnamilegacy/queue-operator:2.0.0",
+      "attributes": [],
+      "fingerprint": "2e6a963b0d8445b1"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "medium",
+      "component": "topology-operator",
+      "location": {
+        "path": "queue.gotmpl",
+        "line": 13,
+        "column": 19
+      },
+      "reference": "docker.io/bitnamilegacy/topology-operator:1.5.0",
+      "original": "docker.io/bitnamilegacy/topology-operator:1.5.0",
+      "attributes": [],
+      "fingerprint": "a1100b73e527fa26"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "medium",
+      "component": "credential-updater",
+      "location": {
+        "path": "queue.gotmpl",
+        "line": 18,
+        "column": 15
+      },
+      "reference": "docker.io/bitnamilegacy/credential-updater:1.1.0",
+      "original": "docker.io/bitnamilegacy/credential-updater:1.1.0",
+      "attributes": [],
+      "fingerprint": "51c953dfd6c2f3c8"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "medium",
+      "component": "queue-server",
+      "location": {
+        "path": "queue.gotmpl",
+        "line": 23,
+        "column": 15
+      },
+      "reference": "docker.io/bitnamilegacy/queue-server:4.2.0",
+      "original": "docker.io/bitnamilegacy/queue-server:4.2.0",
+      "attributes": [],
+      "fingerprint": "0be3601f057d011d"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "cache.gotmpl",
+        "line": 5,
+        "column": 26
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "fed93c67a1294668"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "queue.gotmpl",
+        "line": 28,
+        "column": 26
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "8f68d2dfdc5d1a05"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "DSD-SCN-007",
+      "level": "info",
+      "message": "file read as template text",
+      "location": {
+        "path": "cache.gotmpl",
+        "line": 0,
+        "column": 0
+      }
+    },
+    {
+      "code": "DSD-SCN-007",
+      "level": "info",
+      "message": "file read as template text",
+      "location": {
+        "path": "queue.gotmpl",
+        "line": 0,
+        "column": 0
+      }
+    }
+  ]
+}

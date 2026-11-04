@@ -1,0 +1,29 @@
+{{- $settings := .Values -}}
+
+operator:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/queue-operator
+    tag: 2.0.0
+
+topology:
+  nested:
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/topology-operator
+      tag: 1.5.0
+
+credentialUpdaterImage:
+  registry: docker.io
+  repository: bitnamilegacy/credential-updater
+  tag: 1.1.0
+
+serverImage:
+  registry: docker.io
+  repository: bitnamilegacy/queue-server
+  tag: 4.2.0
+
+global:
+  security:
+    allowInsecureImages: true
+  storageClass: {{ $settings.cluster.storageClass }}

@@ -1,0 +1,13 @@
+{{- $settings := .Values -}}
+
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  registry: registry.example.test
+  repository: example/cache
+  tag: 9.0.0
+
+primary:
+  nodeSelector: {{- toYaml $settings.nodeSelector | nindent 4 }}
