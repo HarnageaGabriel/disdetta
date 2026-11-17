@@ -208,6 +208,23 @@ type fileFlags struct {
 	ignoreFile bool
 }
 
+// valuesGotmpl reports whether a lower-cased file name is a Go template that
+// can hold Helm values or a Helmfile: x.gotmpl, x.yaml.gotmpl and the like. A
+// template of documentation (README.md.gotmpl, written for helm-docs) is not
+// read: it holds prose, not values.
+func valuesGotmpl(lower string) bool {
+	inner, ok := strings.CutSuffix(lower, ".gotmpl")
+	if !ok {
+		return false
+	}
+	for _, documentation := range []string{".md", ".markdown", ".txt", ".rst", ".adoc", ".html", ".htm"} {
+		if strings.HasSuffix(inner, documentation) {
+			return false
+		}
+	}
+	return true
+}
+
 // classifyFile returns the flags of the file named by path. The flags are
 // computed from the name of the file only, so the walk can classify a file
 // before it looks at its metadata, and the scan of the file classifies it the
@@ -218,7 +235,7 @@ func classifyFile(path string) fileFlags {
 		yaml:       strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml"),
 		dockerfile: lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") || strings.HasSuffix(lower, ".dockerfile"),
 		terraform:  strings.HasSuffix(lower, ".tf"),
-		template:   strings.HasSuffix(lower, ".tpl") || strings.HasSuffix(lower, ".yaml.gotmpl"),
+		template:   strings.HasSuffix(lower, ".tpl") || valuesGotmpl(lower),
 		ignoreFile: lower == ".disdetta.yaml",
 	}
 	if len(lower) == len("kustomization") {
