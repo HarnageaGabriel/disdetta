@@ -18,6 +18,10 @@ import (
 // exported so the client and its tests agree on pagination.
 const ListLimit = 500
 
+// defaultScanTimeout is the total time budget of a cluster scan when no
+// --timeout is given (spec v0.2 section 4, audit F2).
+const defaultScanTimeout = 30 * time.Second
+
 // Tier 2 label keys (spec v0.2 section 2).
 const (
 	labelChart    = "helm.sh/chart"
@@ -31,7 +35,12 @@ type Options struct {
 	Kubeconfig      string
 	Namespaces      []string
 	ReadHelmSecrets bool
-	Timeout         time.Duration
+	// Timeout is the total time budget of the scan, not the timeout of one
+	// list (spec v0.2 section 4, audit F2).
+	Timeout time.Duration
+	// DenyExecPlugins refuses a kubeconfig whose selected user runs a
+	// credential plugin, because client-go would execute it (audit F3).
+	DenyExecPlugins bool
 }
 
 // chartMetadata is the subset of Helm chart metadata the scan reads, from the
@@ -62,46 +71,83 @@ type decodedRelease struct {
 // Scan reads the cluster through source and returns a deterministic report
 // (spec v0.2). source issues read-only list calls only (ADR 0007). The returned
 // error is non-nil only when ctx is cancelled; a list that fails is a
-// DSD-SCN-010 diagnostic and the scan continues.
+// DSD-SCN-010 diagnostic, a list that reaches a safety limit a DSD-SCN-005 one,
+// and the scan continues.
+//
+// The whole scan shares one deadline, derived from the --timeout value, which
+// is the total time budget of the scan (audit F2). When the budget is spent,
+// the scan stops cleanly, reports the objects it did read and one diagnostic
+// that says the scan is incomplete.
 func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error) {
 	var out diag.Report
 	mandatoryIncomplete := false
 
-	workloads, failures := source.ListWorkloads(ctx, opts.Namespaces)
-	for _, f := range failures {
+	budget := opts.Timeout
+	if budget <= 0 {
+		budget = defaultScanTimeout
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	workloads, failures := source.ListWorkloads(scanCtx, opts.Namespaces)
+	for i, f := range failures {
+		if scanCtx.Err() != nil && f.Deadline {
+			// Only a parent-budget timeout is folded into the one budget
+			// diagnostic. A per-request timeout remains a list failure.
+			continue
+		}
 		out.Diagnostics = append(out.Diagnostics, listDiagnostic(f))
-		if f.Forbidden && f.Tier <= 2 {
-			mandatoryIncomplete = true
+		mandatoryIncomplete = true
+		if scanCanceled(scanCtx, i) {
+			break
 		}
 	}
 	// summary.filesScanned counts the cluster objects read (spec v0.2 section 3).
 	out.Summary.FilesScanned += len(workloads.Templates) + len(workloads.Pods)
 
-	registries := runningImageRegistries(workloads.Pods)
-	for _, w := range workloads.Templates {
-		out.Findings = append(out.Findings, workloadFindings(opts.Context, w, registries)...)
+	registries := runningImageRegistries(scanCtx, workloads.Pods)
+	for i, w := range workloads.Templates {
+		if scanCanceled(scanCtx, i) {
+			break
+		}
+		findings, complete := workloadFindings(scanCtx, opts.Context, w, registries)
+		out.Findings = append(out.Findings, findings...)
+		if !complete {
+			break
+		}
 	}
-	for _, p := range workloads.Pods {
+	for i, p := range workloads.Pods {
+		if scanCanceled(scanCtx, i) {
+			break
+		}
 		if p.Owned {
 			// A pod with a controller owner is not a template source (spec 2).
 			continue
 		}
-		out.Findings = append(out.Findings, podFindings(opts.Context, p, registries)...)
+		findings, complete := podFindings(scanCtx, opts.Context, p, registries)
+		out.Findings = append(out.Findings, findings...)
+		if !complete {
+			break
+		}
 	}
 
-	if opts.ReadHelmSecrets {
-		releases, relFailures := source.ListReleases(ctx, opts.Namespaces)
-		for _, f := range relFailures {
+	if opts.ReadHelmSecrets && scanCtx.Err() == nil {
+		releases, relFailures := source.ListReleases(scanCtx, opts.Namespaces)
+		for i, f := range relFailures {
+			if scanCtx.Err() != nil && f.Deadline {
+				continue
+			}
 			out.Diagnostics = append(out.Diagnostics, listDiagnostic(f))
-			if f.Forbidden {
-				// Tier 3 is off by default, but a requested list that RBAC forbids
-				// means the requested scan is incomplete (review 03 M2, spec v0.2
-				// section 4).
-				mandatoryIncomplete = true
+			mandatoryIncomplete = true
+			if scanCanceled(scanCtx, i) {
+				break
 			}
 		}
 		out.Summary.FilesScanned += len(releases)
-		for _, rel := range releases {
+		for i, rel := range releases {
+			if scanCanceled(scanCtx, i) {
+				break
+			}
 			findings, diagnostic := releaseFindings(opts.Context, rel)
 			out.Findings = append(out.Findings, findings...)
 			if diagnostic != nil {
@@ -110,11 +156,41 @@ func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error)
 		}
 	}
 
-	out.Findings = dedupeCluster(out.Findings)
-	sortClusterFindings(out.Findings)
-	assignFingerprints(out.Findings)
-	out.Summary.Releases, out.Groups = diag.ClusterSummary(out.Findings)
-	out.Summary.Findings = countSeverities(out.Findings)
+	if scanCtx.Err() == nil {
+		var complete bool
+		out.Findings, complete = dedupeCluster(scanCtx, out.Findings)
+		if !complete {
+			out.Findings = nil
+		}
+	}
+	if scanCtx.Err() == nil {
+		sortClusterFindings(out.Findings)
+		if scanCtx.Err() != nil {
+			out.Findings = nil
+		}
+	}
+	if scanCtx.Err() == nil {
+		assignFingerprints(scanCtx, out.Findings)
+		if scanCtx.Err() != nil {
+			out.Findings = nil
+		}
+	}
+	if scanCtx.Err() == nil {
+		out.Summary.Releases, out.Groups = diag.ClusterSummary(out.Findings)
+	}
+	if scanCtx.Err() == nil {
+		out.Summary.Findings = countSeverities(scanCtx, out.Findings)
+	}
+	if scanCtx.Err() != nil {
+		// Findings are report-ready only after dedupe, ordering and
+		// fingerprinting. Do not emit a partially aggregated finding.
+		out.Findings = nil
+		out.Groups = nil
+		out.Summary.Findings = diag.FindingCounts{}
+		out.Summary.Releases = 0
+		out.Diagnostics = append(out.Diagnostics, budgetDiagnostic(budget))
+		mandatoryIncomplete = true
+	}
 	sortDiagnostics(out.Diagnostics)
 	out.Summary.Diagnostics = len(out.Diagnostics)
 	out.Summary.Complete = !mandatoryIncomplete
@@ -131,24 +207,27 @@ func Scan(ctx context.Context, source Source, opts Options) (diag.Report, error)
 
 // workloadFindings scans every container of one workload template (spec v0.2
 // section 3).
-func workloadFindings(context string, w Workload, registries map[string]map[string]bool) []diag.Finding {
-	return containerFindings(context, w.Namespace, w.Kind, w.Name, w.Owners, w.Labels, w.Containers, registries)
+func workloadFindings(ctx context.Context, contextName string, w Workload, registries map[string]map[string]bool) ([]diag.Finding, bool) {
+	return containerFindings(ctx, contextName, w.Namespace, w.Kind, w.Name, w.Owners, w.Labels, w.Containers, registries)
 }
 
 // podFindings scans a standalone pod's containers (spec v0.2 section 3).
-func podFindings(context string, p Pod, registries map[string]map[string]bool) []diag.Finding {
-	return containerFindings(context, p.Namespace, "Pod", p.Name, p.OwnerChain, p.Labels, p.Containers, registries)
+func podFindings(ctx context.Context, contextName string, p Pod, registries map[string]map[string]bool) ([]diag.Finding, bool) {
+	return containerFindings(ctx, contextName, p.Namespace, "Pod", p.Name, p.OwnerChain, p.Labels, p.Containers, registries)
 }
 
 // containerFindings classifies the containers of one object with the v0.1 rule
 // selection (spec v0.1 section 2.1) and stamps the cluster location and the
 // tier 2 attributes (spec v0.2 section 3).
-func containerFindings(context, namespace, kind, name string, owners []Owner, labels map[string]string, containers []Container, registries map[string]map[string]bool) []diag.Finding {
+func containerFindings(ctx context.Context, contextName, namespace, kind, name string, owners []Owner, labels map[string]string, containers []Container, registries map[string]map[string]bool) ([]diag.Finding, bool) {
 	chart, release := chartLabels(labels)
 	path := clusterPath(namespace, kind, name)
 	identity := workloadIdentity(namespace, kind, name, owners)
 	out := make([]diag.Finding, 0, len(containers))
-	for _, c := range sortedContainers(containers) {
+	for i, c := range sortedContainers(containers) {
+		if scanCanceled(ctx, i) {
+			return out, false
+		}
 		ref := imageref.Parse(c.Image)
 		class, ok, _ := detect.ClassifyReference(ref, false, false)
 		if !ok {
@@ -169,10 +248,10 @@ func containerFindings(context, namespace, kind, name string, owners []Owner, la
 			Reference:  class.Reference,
 			Original:   class.Original,
 			Attributes: attrs,
-			Resource:   &diag.Resource{Context: context, Namespace: namespace, Kind: kind, Name: name, Container: c.Name, Release: release, Chart: chart},
+			Resource:   &diag.Resource{Context: contextName, Namespace: namespace, Kind: kind, Name: name, Container: c.Name, Release: release, Chart: chart},
 		})
 	}
-	return out
+	return out, true
 }
 
 // releaseFindings decodes one Helm release payload and scans its chart metadata
@@ -263,11 +342,17 @@ func chartLabels(labels map[string]string) (chart, release string) {
 // its declared image to the registries observed in the imageID, so the mirror
 // attribute is scoped to the owning workload and container instead of the whole
 // namespace and image (review 03 m2, spec v0.2 section 2, tier 1).
-func runningImageRegistries(pods []Pod) map[string]map[string]bool {
+func runningImageRegistries(ctx context.Context, pods []Pod) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
-	for _, p := range pods {
+	for i, p := range pods {
+		if scanCanceled(ctx, i) {
+			break
+		}
 		identity := workloadIdentity(p.Namespace, "Pod", p.Name, p.OwnerChain)
-		for _, status := range p.Status {
+		for j, status := range p.Status {
+			if scanCanceled(ctx, j) {
+				return out
+			}
 			if status.Image == "" || status.ImageID == "" {
 				continue
 			}
@@ -357,13 +442,16 @@ func contains(values []string, want string) bool {
 // dedupeCluster drops exact repeats. Unlike the repository scanner, two
 // containers of one workload are distinct findings, so the container is part of
 // the identity (spec v0.2 section 3).
-func dedupeCluster(in []diag.Finding) []diag.Finding {
+func dedupeCluster(ctx context.Context, in []diag.Finding) ([]diag.Finding, bool) {
 	if len(in) < 2 {
-		return in
+		return in, ctx.Err() == nil
 	}
 	seen := make(map[string]bool, len(in))
 	out := in[:0]
-	for _, f := range in {
+	for i, f := range in {
+		if scanCanceled(ctx, i) {
+			return out, false
+		}
 		key := f.RuleID + "\x00" + f.Location.Path + "\x00" + f.Reference + "\x00" + f.Original + "\x00" + string(f.Confidence) + "\x00" + container(f)
 		if seen[key] {
 			continue
@@ -371,7 +459,7 @@ func dedupeCluster(in []diag.Finding) []diag.Finding {
 		seen[key] = true
 		out = append(out, f)
 	}
-	return out
+	return out, true
 }
 
 // sortClusterFindings applies the cluster order: severity, impact, path,
@@ -434,9 +522,12 @@ func resourceName(f diag.Finding) string {
 // assignFingerprints numbers occurrences in sorted order and hashes them, using
 // the v0.1 key with the cluster path in place of the file path (spec v0.2
 // section 3).
-func assignFingerprints(findings []diag.Finding) {
+func assignFingerprints(ctx context.Context, findings []diag.Finding) {
 	occurrence := map[string]int{}
 	for i := range findings {
+		if scanCanceled(ctx, i) {
+			return
+		}
 		f := &findings[i]
 		key := f.RuleID + "\x00" + f.Location.Path + "\x00" + f.Reference
 		n := occurrence[key]
@@ -451,9 +542,12 @@ func assignFingerprints(findings []diag.Finding) {
 	}
 }
 
-func countSeverities(findings []diag.Finding) diag.FindingCounts {
+func countSeverities(ctx context.Context, findings []diag.Finding) diag.FindingCounts {
 	var counts diag.FindingCounts
-	for _, f := range findings {
+	for i, f := range findings {
+		if scanCanceled(ctx, i) {
+			break
+		}
 		switch f.Severity {
 		case diag.SeverityHigh:
 			counts.High++
@@ -466,23 +560,51 @@ func countSeverities(findings []diag.Finding) diag.FindingCounts {
 	return counts
 }
 
+// scanCanceled amortizes cancellation checks in large CPU-only loops.
+func scanCanceled(ctx context.Context, index int) bool {
+	return index&1023 == 0 && ctx.Err() != nil
+}
+
 // listDiagnostic renders one failed list as DSD-SCN-010 (spec v0.2 sections 4,
-// 5). A forbidden list is a warning; any other failure is an error. No API error
-// text is echoed.
+// 5). A forbidden list is a warning; any other failure is an error. A list that
+// reached a safety limit is DSD-SCN-005, a warning. No API error text is
+// echoed.
 func listDiagnostic(f ListFailure) diag.Diagnostic {
+	code := f.Code
+	if code == "" {
+		code = "DSD-SCN-010"
+	}
 	level, reason := diag.LevelError, "failed"
-	if f.Forbidden {
+	switch {
+	case code == "DSD-SCN-005":
+		level, reason = diag.LevelWarning, "reached a safety limit"
+	case f.Forbidden:
 		level, reason = diag.LevelWarning, "is forbidden by RBAC"
 	}
 	namespace := f.Namespace
 	if namespace == "" {
 		namespace = "all"
 	}
+	message := fmt.Sprintf("tier %d list of %s in namespace %s %s", f.Tier, f.Resource, namespace, reason)
+	if f.Detail != "" {
+		message += ": " + f.Detail
+	}
 	return diag.Diagnostic{
-		Code:     "DSD-SCN-010",
+		Code:     code,
 		Level:    level,
-		Message:  fmt.Sprintf("tier %d list of %s in namespace %s %s; the tier is not fully scanned", f.Tier, f.Resource, namespace, reason),
+		Message:  message + "; the tier is not fully scanned",
 		Location: diag.Location{Path: "cluster/" + namespace + "/" + f.Resource},
+	}
+}
+
+// budgetDiagnostic reports that the scan spent its total time budget: the
+// objects it did not read are unknown, so the scan is incomplete (audit F2).
+func budgetDiagnostic(budget time.Duration) diag.Diagnostic {
+	return diag.Diagnostic{
+		Code:     "DSD-SCN-005",
+		Level:    diag.LevelWarning,
+		Message:  fmt.Sprintf("the scan spent its total time budget of %s; the scan is incomplete", budget),
+		Location: diag.Location{Path: "cluster"},
 	}
 }
 

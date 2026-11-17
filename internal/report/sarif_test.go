@@ -274,6 +274,70 @@ func TestIgnoredFindingsAbsentFromSARIFResults(t *testing.T) {
 	}
 }
 
+// audit F5: the SARIF writer escapes the Unicode format characters that
+// SafeText escapes in the table, so no raw bidi override survives in the
+// machine-readable output. The escape is lossless: a JSON parser decodes it
+// back to the original character.
+func TestSARIFEscapesFormatCharacters(t *testing.T) {
+	name := "web\u202etxt\u2066"
+	r := diag.Report{
+		Summary: diag.Summary{Complete: true},
+		Findings: []diag.Finding{{
+			RuleID: "DSD-IMG-002", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactHigh,
+			Location:  diag.Location{Path: "cluster/db/Deployment/" + name},
+			Reference: "docker.io/bitnami/redis:7",
+			Resource:  &diag.Resource{Namespace: "db", Kind: "Deployment", Name: name, Container: "web"},
+		}},
+		Diagnostics: []diag.Diagnostic{{Code: "DSD-SCN-010", Level: diag.LevelWarning, Message: "hostile \u202e name"}},
+	}
+	var b bytes.Buffer
+	if err := SARIF(&b, r); err != nil {
+		t.Fatal(err)
+	}
+	out := b.Bytes()
+	if bytes.Contains(out, []byte("\u202e")) || bytes.Contains(out, []byte("\u2066")) {
+		t.Fatalf("audit F5: raw format character in the SARIF: %s", out)
+	}
+	if !bytes.Contains(out, []byte(`\u202e`)) || !bytes.Contains(out, []byte(`\u2066`)) {
+		t.Fatalf("audit F5: not escaped in the SARIF: %s", out)
+	}
+	var decoded struct {
+		Runs []struct {
+			Results []struct {
+				Message struct {
+					Text string `json:"text"`
+				} `json:"message"`
+				Locations []struct {
+					LogicalLocations []struct {
+						FullyQualifiedName string `json:"fullyQualifiedName"`
+						Kind               string `json:"kind"`
+					} `json:"logicalLocations"`
+				} `json:"locations"`
+			} `json:"results"`
+			Invocations []struct {
+				ToolExecutionNotifications []struct {
+					Message struct {
+						Text string `json:"text"`
+					} `json:"message"`
+				} `json:"toolExecutionNotifications"`
+			} `json:"invocations"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	result := decoded.Runs[0].Results[0]
+	if result.Locations[0].LogicalLocations[0].FullyQualifiedName != "cluster/db/Deployment/"+name {
+		t.Errorf("audit F5: the SARIF does not decode back to the original path: %q", result.Locations[0].LogicalLocations[0].FullyQualifiedName)
+	}
+	if result.Locations[0].LogicalLocations[0].Kind != "Deployment" {
+		t.Errorf("audit F5: the SARIF does not decode back to the original kind: %q", result.Locations[0].LogicalLocations[0].Kind)
+	}
+	if decoded.Runs[0].Invocations[0].ToolExecutionNotifications[0].Message.Text != "hostile \u202e name" {
+		t.Errorf("audit F5: the SARIF does not decode back to the original diagnostic")
+	}
+}
+
 func TestSARIFDoesNotLeakUnsafeFindingFields(t *testing.T) {
 	secret := "PLANTED-secret-token-123"
 	r := diag.Report{

@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/HarnageaGabriel/disdetta/internal/diag"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTableEscapesCellsAndSummarizes(t *testing.T) {
@@ -50,6 +55,148 @@ func TestTableEscapesFormatCharacters(t *testing.T) {
 	}
 	if !strings.Contains(s, "\\u202e") || !strings.Contains(s, "\\u200b") {
 		t.Fatalf("review 02 F15: not escaped in %q", s)
+	}
+}
+
+// audit F5: the JSON writer escapes the Unicode format characters that
+// SafeText escapes in the table, so no raw bidi override or zero-width
+// character survives in the machine-readable output. The escape is lossless: a
+// JSON parser decodes it back to the original character.
+func TestJSONEscapesFormatCharacters(t *testing.T) {
+	name := "web\u202etxt\u2066"
+	r := diag.Report{
+		Summary: diag.Summary{Complete: true},
+		Findings: []diag.Finding{{
+			RuleID: "DSD-IMG-002", Severity: diag.SeverityHigh, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactHigh,
+			Location:  diag.Location{Path: "cluster/db/Deployment/" + name},
+			Reference: "docker.io/bitnami/redis:7",
+			Resource:  &diag.Resource{Namespace: "db", Kind: "Deployment", Name: name, Container: "web"},
+		}},
+		Diagnostics: []diag.Diagnostic{{Code: "DSD-SCN-010", Level: diag.LevelWarning, Message: "hostile \u202e name", Location: diag.Location{Path: "cluster/db/" + name}}},
+	}
+	var b bytes.Buffer
+	if err := JSON(&b, r); err != nil {
+		t.Fatal(err)
+	}
+	out := b.Bytes()
+	if bytes.Contains(out, []byte("\u202e")) || bytes.Contains(out, []byte("\u2066")) {
+		t.Fatalf("audit F5: raw format character in the JSON: %s", out)
+	}
+	if !bytes.Contains(out, []byte(`\u202e`)) || !bytes.Contains(out, []byte(`\u2066`)) {
+		t.Fatalf("audit F5: not escaped in the JSON: %s", out)
+	}
+	var decoded struct {
+		Findings []struct {
+			Location struct {
+				Path string `json:"path"`
+			} `json:"location"`
+			Resource struct {
+				Name string `json:"name"`
+			} `json:"resource"`
+		} `json:"findings"`
+		Diagnostics []struct {
+			Message  string `json:"message"`
+			Location struct {
+				Path string `json:"path"`
+			} `json:"location"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Findings[0].Location.Path != "cluster/db/Deployment/"+name {
+		t.Errorf("audit F5: the JSON does not decode back to the original path: %q", decoded.Findings[0].Location.Path)
+	}
+	if decoded.Findings[0].Resource.Name != name {
+		t.Errorf("audit F5: the JSON does not decode back to the original name: %q", decoded.Findings[0].Resource.Name)
+	}
+	if decoded.Diagnostics[0].Message != "hostile \u202e name" || decoded.Diagnostics[0].Location.Path != "cluster/db/"+name {
+		t.Errorf("audit F5: the JSON does not decode back to the original diagnostic: %#v", decoded.Diagnostics[0])
+	}
+}
+
+func TestStreamingJSONMatchesBufferedOutputForGoldens(t *testing.T) {
+	root := filepath.Join("..", "..", "testdata")
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || (!strings.HasSuffix(path, ".json.golden") && !strings.HasSuffix(path, ".sarif.golden")) {
+			return nil
+		}
+		name, _ := filepath.Rel(root, path)
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value any
+			if err := json.Unmarshal(data, &value); err != nil {
+				t.Fatal(err)
+			}
+			var streamed, buffered bytes.Buffer
+			if err := writeJSON(&streamed, value); err != nil {
+				t.Fatal(err)
+			}
+			var raw bytes.Buffer
+			enc := json.NewEncoder(&raw)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(value); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < len(raw.Bytes()); {
+				r, size := utf8.DecodeRune(raw.Bytes()[i:])
+				if needsJSONEscape(r) {
+					_, _ = fmt.Fprintf(&buffered, `\u%04x`, r)
+				} else {
+					_, _ = buffered.Write(raw.Bytes()[i : i+size])
+				}
+				i += size
+			}
+			if !bytes.Equal(streamed.Bytes(), buffered.Bytes()) {
+				t.Fatal("streaming output differs from buffered output")
+			}
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFormatEscapingWriterRetainsSplitRune(t *testing.T) {
+	var out bytes.Buffer
+	w := &formatEscapingWriter{dst: &out}
+	encoded := []byte("a\u202eb")
+	if _, err := w.Write(encoded[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(encoded[2:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := out.String(), `a\u202eb`; got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestJSONEscapesSupplementaryFormatCharactersLosslessly(t *testing.T) {
+	original := "tag:\U000e0001 music:\U0001d173"
+	var out bytes.Buffer
+	if err := writeJSON(&out, original); err != nil {
+		t.Fatal(err)
+	}
+	var decoded string
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded != original {
+		t.Fatalf("round trip got %q want %q; JSON %s", decoded, original, out.Bytes())
+	}
+	if strings.Contains(out.String(), "e0001") || strings.Contains(out.String(), "1d173") {
+		t.Fatalf("non-surrogate escape emitted: %s", out.Bytes())
 	}
 }
 

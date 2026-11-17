@@ -699,6 +699,13 @@ reports the same rule IDs.
   `DSD-CFG-001` and `DSD-CHT-002` findings.
 - A namespace outside the granted permissions is reported as `DSD-SCN-010`, and
   the scan continues.
+- `--timeout` is the total time budget of the scan (default 30 s), not the
+  timeout of one list. When the budget is spent the scan stops and reports
+  that it is incomplete.
+- `--deny-exec-plugins` refuses a kubeconfig whose user runs a credential
+  plugin, because client-go would run that program. The cloud kubeconfigs
+  need their plugin, so the flag is opt-in; the details are in
+  [docs/cluster-rbac.md](../cluster-rbac.md).
 
 Input (`testdata/cluster/basic/objects.yaml`):
 
