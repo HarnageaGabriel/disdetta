@@ -1,0 +1,63 @@
+name: Micro-task
+description: A small, scoped task that one pull request can close
+title: "task: "
+labels: [microtask, status/ready]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One micro-task is one issue, one branch and one pull request that says
+        `Closes #N`. See [docs/workflow.md](https://github.com/HarnageaGabriel/disdetta/blob/main/docs/workflow.md).
+        Do not use this form for a vulnerability: report it privately.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: "One sentence: the result, not the steps."
+    validations:
+      required: true
+  - type: textarea
+    id: touches
+    attributes:
+      label: Touches
+      description: The files or directories the change may edit. Everything else is read-only.
+      placeholder: "internal/detect/helmfile.go, internal/detect/helmfile_test.go"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: Checkable statements, for example a test that fails before and passes after.
+    validations:
+      required: true
+  - type: textarea
+    id: verify
+    attributes:
+      label: Verify
+      description: The exact commands.
+      value: |
+        go vet ./...
+        go test ./...
+        golangci-lint run ./...
+    validations:
+      required: true
+  - type: input
+    id: depends
+    attributes:
+      label: Depends on
+      description: Issues that must be merged first, or "none".
+      value: none
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: Changed lines of the pull request. Split anything larger than M.
+      options:
+        - XS (under 30 lines)
+        - S (under 150 lines)
+        - M (under 400 lines)
+    validations:
+      required: true

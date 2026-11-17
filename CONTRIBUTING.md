@@ -19,6 +19,8 @@ The `Signed-off-by` line certifies the contribution under the
 
 Roles, decisions, and releases are described in [docs/governance.md](docs/governance.md).
 The release procedure is in [docs/releasing.md](docs/releasing.md).
+Work is cut into small tasks, one issue and one pull request each: see
+[docs/workflow.md](docs/workflow.md).
 
 ## Development
 
