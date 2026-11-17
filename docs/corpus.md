@@ -10,6 +10,30 @@ disdetta scan <repo> --format json > <repo>.json   # one per repository
 python tools/corpus/recall.py other                  # or: templates
 ```
 
+## Comparing binaries
+
+Build the old binary from `origin/main`, then build the new binary from the
+branch under test. For example, from the repository parent directory:
+
+```sh
+git worktree add disdetta-main origin/main
+cd disdetta-main && go build -o ../old/disdetta ./cmd/disdetta
+cd ../disdetta && go build -o ../new/disdetta ./cmd/disdetta
+```
+
+Compare both binaries against one or more repository directories with:
+
+```sh
+python tools/corpus/diff.py old/disdetta new/disdetta testdata/repos/*
+python tools/corpus/diff.py --findings old/disdetta new/disdetta testdata/repos/*
+```
+
+The command runs `scan --format json --fail-on none` without writing to the
+repositories. It prints differing repository paths and ends with `compared N,
+differences M`; `--findings` also lists new and lost findings by rule, path,
+line, and column. On Windows, use the corresponding `.exe` paths and PowerShell
+directory expansion.
+
 `recall.py` compares disdetta's findings with a deliberately broad `rg` search
 for Bitnami namespaces, chart sources and `allowInsecureImages: true`. The
 broad search over-matches (container paths such as `/opt/bitnami/...`, URLs to
