@@ -1,13 +1,23 @@
 LOCATION                             RULE         SEVERITY  CONFIDENCE  IMPACT   REFERENCE
 helmfile.yaml:16:29                  DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+helmfile.yaml:40:16                  DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+helmfile.yaml:54:23                  DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/minio
 helmfile.yaml.gotmpl:8:25            DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/redis
+helmfile.yaml.gotmpl:28:12           DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/postgresql
+helmfile.yaml.gotmpl:42:19           DSD-IMG-001  high      confirmed   high     docker.io/bitnamilegacy/minio
+helmfile.yaml:57:34                  DSD-CFG-001  high      confirmed   unknown  true
+helmfile.yaml.gotmpl:45:30           DSD-CFG-001  high      confirmed   unknown  true
 helmfile.d/duplicate-name.yaml:8:12  DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
 helmfile.yaml:14:12                  DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
 helmfile.yaml:18:12                  DSD-CHT-001  medium    confirmed   high     registry-1.docker.io/bitnamicharts
+helmfile.yaml:31:12                  DSD-CHT-001  medium    confirmed   high     oci://registry-1.docker.io/bitnamicharts
+helmfile.yaml:43:12                  DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
 helmfile.yaml.gotmpl:6:10            DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
 helmfile.yaml.gotmpl:11:10           DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
+helmfile.yaml.gotmpl:19:10           DSD-CHT-001  medium    confirmed   high     oci://registry-1.docker.io/bitnamicharts
+helmfile.yaml.gotmpl:31:10           DSD-CHT-001  medium    confirmed   high     https://charts.bitnami.com/bitnami
 helmfile.d/extra.yaml:6:12           DSD-CHT-001  medium    confirmed   low      https://charts.bitnami.com/bitnami
 helmfile.d/multi-doc.yaml:3:12       DSD-CHT-001  medium    confirmed   low      https://charts.bitnami.com/bitnami
 helmfile.yaml:20:12                  DSD-CHT-001  medium    confirmed   low      oci://registry-1.docker.io/bitnamicharts
 helmfile.yaml:8:10                   DSD-CHT-001  medium    confirmed   unknown  oci://registry-1.docker.io/bitnamicharts
-scanned 6 files, skipped 0, findings 11 (high 2, medium 9, low 0), diagnostics 1, unresolved 0, ignored 0
+scanned 6 files, skipped 0, findings 21 (high 8, medium 13, low 0), diagnostics 1, unresolved 0, ignored 0

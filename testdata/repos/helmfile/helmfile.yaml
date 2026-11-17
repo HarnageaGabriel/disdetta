@@ -22,3 +22,39 @@ releases:
     chart: stable/nginx
     values:
       - values/postgresql.yaml
+  - name: postgres
+    namespace: postgres
+    labels:
+      app: postgres
+      tier: core
+    version: 16.0.3
+    chart: oci://registry-1.docker.io/bitnamicharts/postgresql
+    set:
+      - name: nameOverride
+        value: postgres
+      - name: auth.database
+        value: ps_db
+      - name: auth.username
+        value: "{{ .Values.postgres.user }}"
+      - name: image.repository
+        value: bitnamilegacy/postgresql
+  - name: blobstore
+    namespace: storage
+    chart: bitnami/minio
+    values:
+      - extraEnvVars:
+          - name: MINIO_DOMAIN
+            value: blobstore.storage.example.com
+        console:
+          enabled: false
+        resourcesPreset: small
+        auth:
+          rootPassword: "{{ .Values.secrets.blobstorePassword }}"
+        image:
+          repository: bitnamilegacy/minio
+        global:
+          security:
+            allowInsecureImages: true
+        persistence:
+          enabled: true
+          size: 10Gi

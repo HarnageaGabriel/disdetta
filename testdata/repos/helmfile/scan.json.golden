@@ -8,8 +8,8 @@
     "filesScanned": 6,
     "filesSkipped": 0,
     "findings": {
-      "high": 2,
-      "medium": 9,
+      "high": 8,
+      "medium": 13,
       "low": 0
     },
     "diagnostics": 1,
@@ -39,6 +39,38 @@
       "severity": "high",
       "confidence": "confirmed",
       "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 40,
+        "column": 16
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "f4a30b0a5232e826"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "minio",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 54,
+        "column": 23
+      },
+      "reference": "docker.io/bitnamilegacy/minio",
+      "original": "bitnamilegacy/minio",
+      "attributes": [],
+      "fingerprint": "8f3aabe214e3eec9"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
       "component": "redis",
       "location": {
         "path": "helmfile.yaml.gotmpl",
@@ -49,6 +81,70 @@
       "original": "bitnamilegacy/redis",
       "attributes": [],
       "fingerprint": "04deafbf5cbd585c"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 28,
+        "column": 12
+      },
+      "reference": "docker.io/bitnamilegacy/postgresql",
+      "original": "bitnamilegacy/postgresql",
+      "attributes": [],
+      "fingerprint": "9e954d378b57710b"
+    },
+    {
+      "ruleId": "DSD-IMG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "minio",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 42,
+        "column": 19
+      },
+      "reference": "docker.io/bitnamilegacy/minio",
+      "original": "bitnamilegacy/minio",
+      "attributes": [],
+      "fingerprint": "fee67295a520157d"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 57,
+        "column": 34
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "5eca4087472cafe2"
+    },
+    {
+      "ruleId": "DSD-CFG-001",
+      "severity": "high",
+      "confidence": "confirmed",
+      "impact": "unknown",
+      "component": "",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 45,
+        "column": 30
+      },
+      "reference": "true",
+      "original": "true",
+      "attributes": [],
+      "fingerprint": "fbf2e57c86f5a954"
     },
     {
       "ruleId": "DSD-CHT-001",
@@ -109,6 +205,42 @@
       "severity": "medium",
       "confidence": "confirmed",
       "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 31,
+        "column": 12
+      },
+      "reference": "oci://registry-1.docker.io/bitnamicharts",
+      "original": "oci://registry-1.docker.io/bitnamicharts/postgresql",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "afd48e6507eca78d"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "minio",
+      "location": {
+        "path": "helmfile.yaml",
+        "line": 43,
+        "column": 12
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/minio",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "ae1666d8ffeab1f5"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
       "component": "redis",
       "location": {
         "path": "helmfile.yaml.gotmpl",
@@ -139,6 +271,42 @@
         "chart"
       ],
       "fingerprint": "63b15ec86610908d"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "postgresql",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 19,
+        "column": 10
+      },
+      "reference": "oci://registry-1.docker.io/bitnamicharts",
+      "original": "oci://registry-1.docker.io/bitnamicharts/postgresql",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "9a59f4b6f4196019"
+    },
+    {
+      "ruleId": "DSD-CHT-001",
+      "severity": "medium",
+      "confidence": "confirmed",
+      "impact": "high",
+      "component": "minio",
+      "location": {
+        "path": "helmfile.yaml.gotmpl",
+        "line": 31,
+        "column": 10
+      },
+      "reference": "https://charts.bitnami.com/bitnami",
+      "original": "bitnami/minio",
+      "attributes": [
+        "chart"
+      ],
+      "fingerprint": "ac7387da3ffec77e"
     },
     {
       "ruleId": "DSD-CHT-001",
@@ -192,7 +360,7 @@
       "attributes": [
         "chart"
       ],
-      "fingerprint": "afd48e6507eca78d"
+      "fingerprint": "7c7fc8cae365f144"
     },
     {
       "ruleId": "DSD-CHT-001",
@@ -210,7 +378,7 @@
       "attributes": [
         "chart"
       ],
-      "fingerprint": "7c7fc8cae365f144"
+      "fingerprint": "6cb7b6dc18afa0a3"
     }
   ],
   "diagnostics": [

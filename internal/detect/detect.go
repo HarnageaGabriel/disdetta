@@ -124,6 +124,11 @@ type walkState struct {
 	templateComment        bool
 	suppressedHelmfileURLs map[[2]int]bool
 	shellScriptNodes       map[*yaml.Node]bool
+	// helmfileSetNodes holds the value scalars of the set and setString
+	// entries of Helmfile releases: the Helmfile detector reports them with
+	// the rules of an image key path, so the whole-scalar fallback never
+	// reports the image part of one of them (spec section 9).
+	helmfileSetNodes map[*yaml.Node]bool
 	// helmfile is the state of the Helmfile file being scanned. It is
 	// shared by the documents of the file and belongs to one scan, so two
 	// scans never share it.
@@ -775,7 +780,7 @@ func (s *walkState) scanFallbackScalar(n *yaml.Node, key string) {
 	if url, ok := chartURLIn(n.Value); ok && !suppressed {
 		s.addFinding(diag.Finding{RuleID: "DSD-CHT-001", Severity: diag.SeverityMedium, Confidence: diag.ConfidenceConfirmed, Impact: diag.ImpactUnknown, Location: loc(s.path, n.Line, n.Column), Reference: url, Original: url, Attributes: []string{"chart"}})
 	}
-	if knownImageKeys[key] || !isWholeImageScalar(n.Value) {
+	if s.helmfileSetNodes[n] || knownImageKeys[key] || !isWholeImageScalar(n.Value) {
 		return
 	}
 	if r := imageref.Parse(n.Value); r.HasStaticEvidence {
